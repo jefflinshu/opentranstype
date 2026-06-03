@@ -38,6 +38,10 @@ final class TranslationHistoryStore: ObservableObject {
     private static let recordsKey = "translationHistoryRecords"
     private static let maximumRecordCount = 300
     private static let liveInputMergeInterval: TimeInterval = 120
+    private static let saveQueue = DispatchQueue(label: "com.curisaas.opentranstype.translation-history")
+    private static let ignoredSourceTexts: Set<String> = [
+        "Require follow-up changes"
+    ]
 
     @Published private(set) var records: [TranslationRecord] = []
 
@@ -66,6 +70,9 @@ final class TranslationHistoryStore: ObservableObject {
         guard !trimmedSource.isEmpty, !trimmedTranslation.isEmpty else {
             return
         }
+        guard !Self.shouldIgnoreSourceText(trimmedSource) else {
+            return
+        }
 
         let record = TranslationRecord(
             sourceText: trimmedSource,
@@ -92,11 +99,16 @@ final class TranslationHistoryStore: ObservableObject {
     }
 
     private func saveRecords() {
-        guard let data = try? JSONEncoder().encode(records) else {
-            return
-        }
+        let records = records
+        let recordsKey = Self.recordsKey
 
-        UserDefaults.standard.set(data, forKey: Self.recordsKey)
+        Self.saveQueue.async {
+            guard let data = try? JSONEncoder().encode(records) else {
+                return
+            }
+
+            UserDefaults.standard.set(data, forKey: recordsKey)
+        }
     }
 
     private func shouldReplaceLatestRecord(with record: TranslationRecord) -> Bool {
@@ -110,12 +122,24 @@ final class TranslationHistoryStore: ObservableObject {
             || record.sourceText.hasPrefix(latestRecord.sourceText)
     }
 
+    private static func shouldIgnoreSourceText(_ sourceText: String) -> Bool {
+        ignoredSourceTexts.contains(normalizedText(sourceText))
+    }
+
+    private static func normalizedText(_ text: String) -> String {
+        text
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .joined(separator: " ")
+    }
+
     private static func loadRecords() -> [TranslationRecord] {
         guard let data = UserDefaults.standard.data(forKey: recordsKey),
               let records = try? JSONDecoder().decode([TranslationRecord].self, from: data) else {
             return []
         }
 
-        return records.sorted { $0.createdAt > $1.createdAt }
+        return records
+            .filter { !shouldIgnoreSourceText($0.sourceText) }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 }

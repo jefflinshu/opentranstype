@@ -6,29 +6,35 @@ enum DiagnosticLog {
         .homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/OpenTransType/diagnostics.log")
 
+    private static let queue = DispatchQueue(label: "com.curisaas.opentranstype.diagnostic-log")
+
     static func reset() {
-        try? FileManager.default.removeItem(at: url)
+        queue.async {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     static func write(_ message: String) {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "[\(timestamp)] \(message)\n"
-        let directory = url.deletingLastPathComponent()
+        queue.async {
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+            let line = "[\(timestamp)] \(message)\n"
+            let directory = url.deletingLastPathComponent()
 
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            if !FileManager.default.fileExists(atPath: url.path) {
-                FileManager.default.createFile(atPath: url.path, contents: nil)
-            }
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    FileManager.default.createFile(atPath: url.path, contents: nil)
+                }
 
-            let handle = try FileHandle(forWritingTo: url)
-            try handle.seekToEnd()
-            if let data = line.data(using: .utf8) {
-                try handle.write(contentsOf: data)
+                let handle = try FileHandle(forWritingTo: url)
+                try handle.seekToEnd()
+                if let data = line.data(using: .utf8) {
+                    try handle.write(contentsOf: data)
+                }
+                try handle.close()
+            } catch {
+                NSLog("OpenTransType diagnostics log failed: \(error.localizedDescription)")
             }
-            try handle.close()
-        } catch {
-            NSLog("OpenTransType diagnostics log failed: \(error.localizedDescription)")
         }
     }
 }
@@ -37,6 +43,9 @@ enum DiagnosticLog {
 final class AppCoordinator: NSObject, NSApplicationDelegate {
     private static let maximumAutomaticTextLength = 2_000
     private static let maximumManualTextLength = 2_000
+    private static let ignoredCapturedTexts: Set<String> = [
+        "Require follow-up changes"
+    ]
 
     private let historyStore: TranslationHistoryStore
     private let model: TranslatorModel
@@ -442,6 +451,15 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             return false
         }
 
+        guard !shouldIgnoreCapturedText(text) else {
+            if lastAutomaticText != text {
+                lastAutomaticText = text
+                model.updateSourceText("")
+                DiagnosticLog.write("\(source) ignored UI text, length=\(text.count), app=\(accessibility.focusedApplicationBundleIdentifier() ?? "unknown")")
+            }
+            return false
+        }
+
         guard text.count <= Self.maximumAutomaticTextLength else {
             if lastAutomaticText != text {
                 lastAutomaticText = text
@@ -591,6 +609,11 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func canTranslateManualText(_ text: String, source: String) -> Bool {
+        guard !shouldIgnoreCapturedText(text) else {
+            DiagnosticLog.write("\(source) ignored UI text, length=\(text.count), app=\(accessibility.focusedApplicationBundleIdentifier() ?? "unknown")")
+            return false
+        }
+
         guard text.count <= Self.maximumManualTextLength else {
             model.enable()
             model.translatedText = ""
@@ -601,6 +624,16 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
 
         return true
+    }
+
+    private func shouldIgnoreCapturedText(_ text: String) -> Bool {
+        Self.ignoredCapturedTexts.contains(normalizedCapturedText(text))
+    }
+
+    private func normalizedCapturedText(_ text: String) -> String {
+        text
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .joined(separator: " ")
     }
 
     private nonisolated func shouldScheduleAutomaticRead(for keyCode: Int64, flags: CGEventFlags) -> Bool {
