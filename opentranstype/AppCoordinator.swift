@@ -38,6 +38,7 @@ enum DiagnosticLog {
 @MainActor
 final class AppCoordinator: NSObject, NSApplicationDelegate {
     private static let maximumAutomaticTextLength = 2_000
+    private static let maximumManualTextLength = 2_000
 
     private let model = TranslatorModel()
     private let accessibility = AccessibilityTextController()
@@ -226,6 +227,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
         let axText = didFindElement ? accessibility.currentText().trimmingCharacters(in: .whitespacesAndNewlines) : ""
         if !axText.isEmpty {
+            guard canTranslateManualText(axText, source: "manual AX") else {
+                return
+            }
+
             DiagnosticLog.write("manual AX text length=\(axText.count)")
             model.forceTranslation(for: axText)
             return
@@ -242,6 +247,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
         let axText = accessibility.currentText().trimmingCharacters(in: .whitespacesAndNewlines)
         if !axText.isEmpty {
+            guard canTranslateManualText(axText, source: "refresh AX") else {
+                return
+            }
+
             accessibility.observeCurrentFocusedElement()
             DiagnosticLog.write("refresh AX text length=\(axText.count), element=\(accessibility.focusedElementDebugSummary())")
             model.forceTranslation(for: axText)
@@ -249,6 +258,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
 
         if let copiedText = await readCurrentTextWithTimeout() {
+            guard canTranslateManualText(copiedText, source: "manual copy") else {
+                return
+            }
+
             DiagnosticLog.write("manual copy fallback text length=\(copiedText.count)")
             model.forceTranslation(for: copiedText)
         } else if showFailure {
@@ -383,6 +396,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         accessibility.refreshFrontmostApplicationObserver()
         let axText = accessibility.currentText().trimmingCharacters(in: .whitespacesAndNewlines)
         if !axText.isEmpty {
+            guard canTranslateManualText(axText, source: "user selection AX") else {
+                return
+            }
+
             model.enable()
             overlayController?.show(near: accessibility.focusedElementFrame())
             model.forceTranslation(for: axText)
@@ -391,11 +408,28 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
 
         if let copiedText = await accessibility.readTextByCopyingCurrentField(collapseSelection: false) {
+            guard canTranslateManualText(copiedText, source: "user selection copy") else {
+                return
+            }
+
             model.enable()
             overlayController?.show(near: accessibility.focusedElementFrame())
             model.forceTranslation(for: copiedText)
             DiagnosticLog.write("user selection copy text length=\(copiedText.count), app=\(accessibility.focusedApplicationBundleIdentifier() ?? "unknown")")
         }
+    }
+
+    private func canTranslateManualText(_ text: String, source: String) -> Bool {
+        guard text.count <= Self.maximumManualTextLength else {
+            model.enable()
+            model.translatedText = ""
+            model.statusText = "文本过长"
+            overlayController?.show(near: accessibility.focusedElementFrame())
+            DiagnosticLog.write("\(source) ignored too long, length=\(text.count)")
+            return false
+        }
+
+        return true
     }
 
     private nonisolated func shouldScheduleAutomaticRead(for keyCode: Int64, flags: CGEventFlags) -> Bool {
