@@ -1,0 +1,10 @@
+build/
+DerivedData/
+.DS_Store
+
+*.xcuserstate
+*.xcuserdata/
+xcuserdata/
+
+*.swp
+*.tmp
