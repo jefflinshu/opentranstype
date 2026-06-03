@@ -18,6 +18,7 @@ final class TranslatorModel: ObservableObject {
 
     private var lastRequestedText = ""
     private var translationTask: Task<Void, Never>?
+    private let translationDebounce: Duration = .milliseconds(350)
 
     var canApplyTranslation: Bool {
         !translatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -67,7 +68,7 @@ final class TranslatorModel: ObservableObject {
 
         lastRequestedText = trimmed
         translatedText = ""
-        statusText = "翻译中..."
+        statusText = "等待输入"
         requestID += 1
         let currentRequestID = requestID
         DiagnosticLog.write("translation requested id=\(currentRequestID), length=\(trimmed.count), target=\(selectedLanguage.name)")
@@ -91,6 +92,9 @@ final class TranslatorModel: ObservableObject {
         translationTask?.cancel()
         translationTask = Task { [weak self] in
             do {
+                try await Task.sleep(for: translationDebounce)
+                await self?.beginTranslationIfCurrent(requestID: currentRequestID)
+
                 let availability: LanguageAvailability
                 if #available(macOS 26.4, *) {
                     availability = LanguageAvailability(preferredStrategy: .lowLatency)
@@ -99,6 +103,7 @@ final class TranslatorModel: ObservableObject {
                 }
 
                 let status = await availability.status(from: sourceLanguage.language, to: targetLanguage)
+                DiagnosticLog.write("translation availability id=\(currentRequestID), source=\(sourceLanguage.id), target=\(selectedLanguage.id), status=\(status)")
                 switch status {
                 case .installed:
                     break
@@ -145,6 +150,15 @@ final class TranslatorModel: ObservableObject {
         translatedText = result
         statusText = "按 ↓ 覆盖原文"
         DiagnosticLog.write("translation finished id=\(requestID), resultLength=\(result.count)")
+    }
+
+    func beginTranslationIfCurrent(requestID: Int) {
+        guard requestID == self.requestID,
+              translatedText.isEmpty else {
+            return
+        }
+
+        statusText = "翻译中..."
     }
 
     func markLanguagePackUnavailable(requestID: Int, sourceID: String) {
