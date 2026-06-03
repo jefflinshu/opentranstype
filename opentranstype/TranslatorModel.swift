@@ -6,6 +6,9 @@ import Translation
 @MainActor
 final class TranslatorModel: ObservableObject {
     private static let selectedLanguageIDKey = "selectedLanguageID"
+    private static let maximumTranslatableTextLength = 2_000
+
+    private let historyStore: TranslationHistoryStore?
 
     @Published var isEnabled = true
     @Published var sourceText = ""
@@ -13,7 +16,12 @@ final class TranslatorModel: ObservableObject {
     @Published var statusText = "正在监听输入"
     @Published var selectedLanguage: TranslationLanguage {
         didSet {
+            guard selectedLanguage != oldValue else {
+                return
+            }
+
             UserDefaults.standard.set(selectedLanguage.id, forKey: Self.selectedLanguageIDKey)
+            DiagnosticLog.write("target language changed from=\(oldValue.id) to=\(selectedLanguage.id)")
             requestTranslation(for: sourceText)
         }
     }
@@ -23,13 +31,18 @@ final class TranslatorModel: ObservableObject {
     private var translationTask: Task<Void, Never>?
     private let translationDebounce: Duration = .milliseconds(350)
     private let translationTimeout: Duration = .seconds(8)
+    private let sameLanguageConfidenceThreshold = 0.72
 
-    init() {
+    init(historyStore: TranslationHistoryStore? = nil) {
+        self.historyStore = historyStore
+
         if let savedLanguageID = UserDefaults.standard.string(forKey: Self.selectedLanguageIDKey),
-           let savedLanguage = TranslationLanguage.supported.first(where: { $0.id == savedLanguageID }) {
+           let savedLanguage = TranslationLanguage.language(withID: savedLanguageID) {
             selectedLanguage = savedLanguage
+            DiagnosticLog.write("target language restored id=\(savedLanguage.id)")
         } else {
-            selectedLanguage = TranslationLanguage.supported[0]
+            selectedLanguage = TranslationLanguage.defaultTarget
+            DiagnosticLog.write("target language default id=\(selectedLanguage.id)")
         }
     }
 
@@ -54,13 +67,13 @@ final class TranslatorModel: ObservableObject {
     }
 
     func updateSourceText(_ text: String) {
-        sourceText = text
-
         guard isEnabled else {
             return
         }
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        sourceText = trimmed
+
         guard !trimmed.isEmpty else {
             translatedText = ""
             statusText = "输入内容后自动翻译"
@@ -70,12 +83,24 @@ final class TranslatorModel: ObservableObject {
             return
         }
 
-        requestTranslation(for: text)
+        requestTranslation(for: trimmed)
     }
 
     func requestTranslation(for text: String, force: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isEnabled, !trimmed.isEmpty, force || trimmed != lastRequestedText else {
+            return
+        }
+
+        guard trimmed.count <= Self.maximumTranslatableTextLength else {
+            sourceText = trimmed
+            translatedText = ""
+            statusText = "文本过长"
+            translationTask?.cancel()
+            translationTask = nil
+            lastRequestedText = trimmed
+            requestID += 1
+            DiagnosticLog.write("translation ignored too long, length=\(trimmed.count)")
             return
         }
 
@@ -105,8 +130,13 @@ final class TranslatorModel: ObservableObject {
             translationTask?.cancel()
             translationTask = nil
             translatedText = ""
-            statusText = "已是目标语言"
-            DiagnosticLog.write("translation skipped same language=\(sourceLanguage.id), length=\(trimmed.count)")
+            if sourceLanguage.confidence >= sameLanguageConfidenceThreshold {
+                statusText = "已是目标语言"
+                DiagnosticLog.write("translation skipped same language=\(sourceLanguage.id), confidence=\(sourceLanguage.confidence), length=\(trimmed.count)")
+            } else {
+                statusText = "继续输入"
+                DiagnosticLog.write("translation skipped uncertain same language=\(sourceLanguage.id), confidence=\(sourceLanguage.confidence), length=\(trimmed.count)")
+            }
             return
         }
 
@@ -182,6 +212,7 @@ final class TranslatorModel: ObservableObject {
 
         translatedText = result
         statusText = "按 ↓ 覆盖原文"
+        historyStore?.recordTranslation(sourceText: sourceText, translatedText: result, targetLanguage: selectedLanguage)
         DiagnosticLog.write("translation finished id=\(requestID), resultLength=\(result.count)")
     }
 
@@ -233,20 +264,21 @@ final class TranslatorModel: ObservableObject {
             return
         }
 
-        statusText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "正在监听输入" : "等待输入"
+        statusText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "正在监听输入" : "翻译超时"
         translationTask?.cancel()
         translationTask = nil
         DiagnosticLog.write("translation timed out id=\(requestID)")
     }
 
     func forceTranslation(for text: String) {
-        sourceText = text
-        requestTranslation(for: text, force: true)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        sourceText = trimmed
+        requestTranslation(for: trimmed, force: true)
     }
 
-    private func detectedSourceLanguage(for text: String) -> (id: String, language: Locale.Language)? {
+    private func detectedSourceLanguage(for text: String) -> (id: String, language: Locale.Language, confidence: Double)? {
         if text.range(of: #"\p{Han}"#, options: .regularExpression) != nil {
-            return ("zh-Hans", Locale.Language(identifier: "zh-Hans"))
+            return ("zh-Hans", Locale.Language(identifier: "zh-Hans"), 1)
         }
 
         let recognizer = NLLanguageRecognizer()
@@ -255,7 +287,8 @@ final class TranslatorModel: ObservableObject {
             return nil
         }
 
-        return (language.rawValue, Locale.Language(identifier: language.rawValue))
+        let confidence = recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0
+        return (language.rawValue, Locale.Language(identifier: language.rawValue), confidence)
     }
 
     private func isReadyForTranslation(_ text: String, force: Bool) -> Bool {

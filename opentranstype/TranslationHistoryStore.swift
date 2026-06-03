@@ -1,0 +1,102 @@
+import Foundation
+import Combine
+
+struct TranslationRecord: Identifiable, Codable, Hashable {
+    let id: UUID
+    let createdAt: Date
+    let sourceText: String
+    let translatedText: String
+    let targetLanguageID: String
+    let targetLanguageName: String
+
+    init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        sourceText: String,
+        translatedText: String,
+        targetLanguage: TranslationLanguage
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.sourceText = sourceText
+        self.translatedText = translatedText
+        self.targetLanguageID = targetLanguage.id
+        self.targetLanguageName = targetLanguage.name
+    }
+}
+
+struct TranslationStats {
+    let recordCount: Int
+    let sourceCharacterCount: Int
+    let translatedCharacterCount: Int
+    let averageSourceLength: Int
+    let latestTargetLanguage: String
+}
+
+@MainActor
+final class TranslationHistoryStore: ObservableObject {
+    private static let recordsKey = "translationHistoryRecords"
+    private static let maximumRecordCount = 300
+
+    @Published private(set) var records: [TranslationRecord] = []
+
+    init() {
+        records = Self.loadRecords()
+    }
+
+    var stats: TranslationStats {
+        let sourceCharacterCount = records.reduce(0) { $0 + $1.sourceText.count }
+        let translatedCharacterCount = records.reduce(0) { $0 + $1.translatedText.count }
+        let averageSourceLength = records.isEmpty ? 0 : sourceCharacterCount / records.count
+        let latestTargetLanguage = records.first?.targetLanguageName ?? "尚未选择"
+
+        return TranslationStats(
+            recordCount: records.count,
+            sourceCharacterCount: sourceCharacterCount,
+            translatedCharacterCount: translatedCharacterCount,
+            averageSourceLength: averageSourceLength,
+            latestTargetLanguage: latestTargetLanguage
+        )
+    }
+
+    func recordTranslation(sourceText: String, translatedText: String, targetLanguage: TranslationLanguage) {
+        let trimmedSource = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTranslation = translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSource.isEmpty, !trimmedTranslation.isEmpty else {
+            return
+        }
+
+        let record = TranslationRecord(
+            sourceText: trimmedSource,
+            translatedText: trimmedTranslation,
+            targetLanguage: targetLanguage
+        )
+        records.insert(record, at: 0)
+        if records.count > Self.maximumRecordCount {
+            records.removeLast(records.count - Self.maximumRecordCount)
+        }
+        saveRecords()
+    }
+
+    func clear() {
+        records.removeAll()
+        saveRecords()
+    }
+
+    private func saveRecords() {
+        guard let data = try? JSONEncoder().encode(records) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: Self.recordsKey)
+    }
+
+    private static func loadRecords() -> [TranslationRecord] {
+        guard let data = UserDefaults.standard.data(forKey: recordsKey),
+              let records = try? JSONDecoder().decode([TranslationRecord].self, from: data) else {
+            return []
+        }
+
+        return records.sorted { $0.createdAt > $1.createdAt }
+    }
+}

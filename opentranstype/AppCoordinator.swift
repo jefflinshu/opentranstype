@@ -38,10 +38,13 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private static let maximumAutomaticTextLength = 2_000
     private static let maximumManualTextLength = 2_000
 
-    private let model = TranslatorModel()
+    private let historyStore: TranslationHistoryStore
+    private let model: TranslatorModel
     private let accessibility = AccessibilityTextController()
     private var overlayController: OverlayWindowController?
     private var onboardingController: OnboardingWindowController?
+    private var dashboardController: DashboardWindowController?
+    private var statusItem: NSStatusItem?
     private var rightMouseMonitor: Any?
     private var activeApplicationObserver: NSObjectProtocol?
     private var keyEventTap: CFMachPort?
@@ -51,14 +54,21 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var lastFrontmostPID: pid_t = 0
     private var frontmostMonitorTick = 0
     private var lastAXMissLogAt = Date.distantPast
+    private var lastAutomaticText = ""
     private var didStartTranslationExperience = false
+
+    override init() {
+        let historyStore = TranslationHistoryStore()
+        self.historyStore = historyStore
+        self.model = TranslatorModel(historyStore: historyStore)
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard claimSingleRunningInstance() else {
             return
         }
 
-        DiagnosticLog.reset()
         DiagnosticLog.write("app launched pid=\(getpid()), trusted=\(accessibility.isTrusted), log=\(DiagnosticLog.url.path)")
         overlayController = OverlayWindowController(
             model: model,
@@ -69,6 +79,8 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
                 }
             }
         )
+        dashboardController = DashboardWindowController(historyStore: historyStore, model: model)
+        installStatusItem()
 
         if UserDefaults.standard.bool(forKey: OnboardingView.didCompleteKey) {
             startTranslationExperience()
@@ -79,6 +91,15 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             onboardingController?.show()
             DiagnosticLog.write("onboarding shown")
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        dashboardController?.show()
+        return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     private func claimSingleRunningInstance() -> Bool {
@@ -101,13 +122,81 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         return false
     }
 
+    private func installStatusItem() {
+        guard statusItem == nil else {
+            return
+        }
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = item.button {
+            button.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "OpenTransType")
+            button.image?.isTemplate = true
+            button.toolTip = "OpenTransType"
+        }
+
+        statusItem = item
+        refreshStatusMenu()
+    }
+
+    @objc private func showDashboardFromStatusItem() {
+        dashboardController?.show()
+    }
+
+    @objc private func toggleTranslationFromStatusItem() {
+        if model.isEnabled {
+            model.disable()
+            overlayController?.hide()
+        } else {
+            model.enable()
+            overlayController?.show(near: nil)
+        }
+
+        refreshStatusMenu()
+    }
+
+    @objc private func showOverlayFromStatusItem() {
+        model.enable()
+        model.statusText = model.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "正在监听输入" : model.statusText
+        overlayController?.show(near: nil)
+        refreshStatusMenu()
+    }
+
+    @objc private func quitFromStatusItem() {
+        NSApp.terminate(nil)
+    }
+
+    private func refreshStatusMenu() {
+        let menu = NSMenu()
+
+        let statusItem = NSMenuItem(title: model.isEnabled ? "翻译已启用" : "翻译已禁用", action: nil, keyEquivalent: "")
+        statusItem.isEnabled = false
+        menu.addItem(statusItem)
+
+        menu.addItem(NSMenuItem(
+            title: model.isEnabled ? "禁用翻译" : "启用翻译",
+            action: #selector(toggleTranslationFromStatusItem),
+            keyEquivalent: ""
+        ))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "打开主窗口", action: #selector(showDashboardFromStatusItem), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "显示翻译浮窗", action: #selector(showOverlayFromStatusItem), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "退出", action: #selector(quitFromStatusItem), keyEquivalent: "q"))
+
+        for item in menu.items {
+            item.target = self
+        }
+
+        self.statusItem?.menu = menu
+    }
+
     private func startTranslationExperience() {
         guard !didStartTranslationExperience else {
             return
         }
 
         didStartTranslationExperience = true
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
         accessibility.requestPermission()
         installActiveApplicationObserver()
         startFrontmostApplicationMonitor()
@@ -118,6 +207,8 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         installKeyEventTap()
         model.enable()
         model.statusText = "正在监听输入"
+        refreshStatusMenu()
+        dashboardController?.show()
         overlayController?.show(near: nil)
         DiagnosticLog.write("overlay shown")
     }
@@ -227,20 +318,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     private func handleObservedText(_ text: String) {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else {
-            DiagnosticLog.write("observed text empty")
-            return
-        }
-
-        guard trimmedText.count <= Self.maximumAutomaticTextLength else {
-            DiagnosticLog.write("observed text ignored too long, length=\(trimmedText.count), element=\(accessibility.focusedElementDebugSummary())")
-            return
-        }
-
-        model.enable()
-        overlayController?.show(near: accessibility.focusedElementFrame())
-        model.updateSourceText(trimmedText)
-        DiagnosticLog.write("observed text accepted, length=\(trimmedText.count), element=\(accessibility.focusedElementDebugSummary())")
+        acceptAutomaticText(trimmedText, source: "observed")
     }
 
     private func installRightClickMonitor() {
@@ -328,12 +406,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private func readTextAfterKeystroke() async {
         accessibility.refreshFrontmostApplicationObserver()
         let axText = accessibility.currentText().trimmingCharacters(in: .whitespacesAndNewlines)
-        if !axText.isEmpty {
-            accessibility.observeCurrentFocusedElement()
-            model.enable()
-            overlayController?.show(near: accessibility.focusedElementFrame())
-            model.updateSourceText(axText)
-            DiagnosticLog.write("keystroke AX text length=\(axText.count), element=\(accessibility.focusedElementDebugSummary())")
+        if acceptAutomaticText(axText, source: "keystroke AX") {
             return
         }
 
@@ -342,6 +415,38 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             DiagnosticLog.write("keystroke AX miss, element=\(accessibility.focusedElementDebugSummary())")
             accessibility.logFocusedElementDiagnostics(reason: "keystroke miss")
         }
+    }
+
+    @discardableResult
+    private func acceptAutomaticText(_ text: String, source: String) -> Bool {
+        guard !text.isEmpty else {
+            if !lastAutomaticText.isEmpty {
+                lastAutomaticText = ""
+                model.updateSourceText("")
+                DiagnosticLog.write("\(source) text empty")
+            }
+            return false
+        }
+
+        guard text.count <= Self.maximumAutomaticTextLength else {
+            if lastAutomaticText != text {
+                lastAutomaticText = text
+                DiagnosticLog.write("\(source) ignored too long, length=\(text.count), element=\(accessibility.focusedElementDebugSummary())")
+            }
+            return false
+        }
+
+        guard text != lastAutomaticText else {
+            return true
+        }
+
+        lastAutomaticText = text
+        accessibility.observeCurrentFocusedElement()
+        model.enable()
+        overlayController?.show(near: accessibility.focusedElementFrame())
+        model.updateSourceText(text)
+        DiagnosticLog.write("\(source) text accepted, length=\(text.count), element=\(accessibility.focusedElementDebugSummary())")
+        return true
     }
 
     private func readCurrentTextWithTimeout() async -> String? {
@@ -395,6 +500,16 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private nonisolated func handleKeyEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            Task { @MainActor in
+                if let keyEventTap = self.keyEventTap {
+                    CGEvent.tapEnable(tap: keyEventTap, enable: true)
+                }
+                DiagnosticLog.write("key event tap re-enabled, type=\(type.rawValue)")
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
@@ -503,9 +618,13 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     private func consumeDownArrowIfPossible() -> Bool {
         guard model.isEnabled, model.canApplyTranslation else {
+            DiagnosticLog.write("down arrow ignored, enabled=\(model.isEnabled), canApply=\(model.canApplyTranslation), status=\(model.statusText), translatedLength=\(model.translatedText.count)")
             return false
         }
 
+        _ = accessibility.refreshFocusedEditableElement()
+        accessibility.observeCurrentFocusedElement()
+        DiagnosticLog.write("down arrow applying translation, element=\(accessibility.focusedElementDebugSummary())")
         overlayController?.applyTranslation()
         return true
     }

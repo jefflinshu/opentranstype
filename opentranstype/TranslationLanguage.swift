@@ -20,4 +20,12 @@ struct TranslationLanguage: Identifiable, Hashable {
         .init(id: "ru", name: "Русский", shortName: "RU", language: Locale.Language(identifier: "ru")),
         .init(id: "ar", name: "العربية", shortName: "AR", language: Locale.Language(identifier: "ar"))
     ]
+
+    static func language(withID id: String) -> TranslationLanguage? {
+        supported.first { $0.id == id }
+    }
+
+    static var defaultTarget: TranslationLanguage {
+        return language(withID: "en") ?? supported[0]
+    }
 }

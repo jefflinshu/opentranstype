@@ -2,51 +2,79 @@ import SwiftUI
 import AppKit
 
 struct TranslationOverlayView: View {
+    private enum Layout {
+        static let cornerRadius: CGFloat = 14
+        static let minHeight: CGFloat = 38
+        static let singleLineTextHeight: CGFloat = 22
+    }
+
     @ObservedObject var model: TranslatorModel
     let onRefresh: () -> Void
     let onApply: () -> Void
     let onClose: () -> Void
     let onDrag: (CGSize) -> Void
     let onDragEnded: () -> Void
+    let onResize: (CGSize) -> Void
+    let onResizeEnded: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            LanguagePopUpButton(selection: $model.selectedLanguage)
-                .frame(width: 44, height: 21)
-                .help("选择目标语言")
+        GeometryReader { proxy in
+            HStack(alignment: .top, spacing: 10) {
+                LanguagePopUpButton(selection: $model.selectedLanguage)
+                    .frame(width: 46, height: 22)
+                    .help("选择目标语言")
 
-            Spacer(minLength: 8)
+                Text(resultText)
+                    .font(.callout)
+                    .foregroundStyle(model.translatedText.isEmpty ? .secondary : .primary)
+                    .lineLimit(proxy.size.height > 58 ? 3 : 1)
+                    .truncationMode(.tail)
+                    .textSelection(.enabled)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: Layout.singleLineTextHeight,
+                        alignment: .topTrailing
+                    )
 
-            Text(resultText)
-                .font(.callout)
-                .foregroundStyle(model.translatedText.isEmpty ? .secondary : .primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .textSelection(.enabled)
-                .frame(maxWidth: 248, alignment: .trailing)
+                Button(action: applyOrRefresh) {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help(model.canApplyTranslation ? "覆盖原文" : "读取当前输入")
 
-            Button(action: applyOrRefresh) {
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 14, weight: .semibold))
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
             }
-            .buttonStyle(.plain)
-            .help(model.canApplyTranslation ? "覆盖原文" : "读取当前输入")
-
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .medium))
+            .padding(.leading, 13)
+            .padding(.trailing, 16)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomTrailing) {
+                ResizeGrip()
+                    .padding(.trailing, 5)
+                    .padding(.bottom, 5)
+                    .gesture(
+                        DragGesture(minimumDistance: 1)
+                            .onChanged { value in
+                                onResize(value.translation)
+                            }
+                            .onEnded { _ in
+                                onResizeEnded()
+                            }
+                    )
+                    .help("拖拽调整工具栏大小")
             }
-            .buttonStyle(.plain)
-            .help("关闭")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .frame(width: 360, height: 38)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(.separator, lineWidth: 1)
-        }
+        .frame(minWidth: 360, minHeight: Layout.minHeight)
+        .liquidGlassPanel(cornerRadius: Layout.cornerRadius)
+        .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     private var resultText: String {
@@ -63,6 +91,17 @@ struct TranslationOverlayView: View {
         } else {
             onRefresh()
         }
+    }
+}
+
+private struct ResizeGrip: View {
+    var body: some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 8, weight: .semibold))
+            .foregroundStyle(.secondary.opacity(0.55))
+            .rotationEffect(.degrees(-45))
+            .frame(width: 14, height: 14)
+            .contentShape(Rectangle())
     }
 }
 
@@ -87,7 +126,7 @@ struct LanguagePopUpButton: NSViewRepresentable {
             reloadItems(in: button)
         }
 
-        if let index = TranslationLanguage.supported.firstIndex(of: selection),
+        if let index = TranslationLanguage.supported.firstIndex(where: { $0.id == selection.id }),
            button.indexOfSelectedItem != index {
             button.selectItem(at: index)
         }
@@ -106,7 +145,7 @@ struct LanguagePopUpButton: NSViewRepresentable {
             button.lastItem?.toolTip = language.name
         }
 
-        if let index = TranslationLanguage.supported.firstIndex(of: selection) {
+        if let index = TranslationLanguage.supported.firstIndex(where: { $0.id == selection.id }) {
             button.selectItem(at: index)
             button.title = selection.shortName
         }
@@ -120,12 +159,12 @@ struct LanguagePopUpButton: NSViewRepresentable {
         }
 
         @objc func languageChanged(_ sender: NSPopUpButton) {
-            let index = sender.indexOfSelectedItem
-            guard TranslationLanguage.supported.indices.contains(index) else {
+            guard let languageID = sender.selectedItem?.representedObject as? String,
+                  let language = TranslationLanguage.language(withID: languageID) else {
                 return
             }
 
-            parent.selection = TranslationLanguage.supported[index]
+            parent.selection = language
             sender.title = parent.selection.shortName
         }
     }

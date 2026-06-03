@@ -235,18 +235,26 @@ final class AccessibilityTextController {
         return CGRect(origin: position, size: size)
     }
 
-    func replaceFocusedText(with text: String) {
+    @discardableResult
+    func replaceFocusedText(with text: String) -> Bool {
         guard let focusedElement else {
-            replaceByPasting(text)
-            return
+            DiagnosticLog.write("replace fallback paste, reason=no focused element")
+            return replaceByPasting(text)
+        }
+
+        if replaceByPasting(text) {
+            DiagnosticLog.write("replace paste preferred, length=\(text.count), element=\(focusedElementDebugSummary())")
+            return true
         }
 
         let directResult = AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
         if directResult == .success {
-            return
+            DiagnosticLog.write("replace AXValue success, length=\(text.count), element=\(focusedElementDebugSummary())")
+            return true
         }
 
-        replaceByPasting(text)
+        DiagnosticLog.write("replace AXValue failed result=\(directResult.rawValue), fallback paste, element=\(focusedElementDebugSummary())")
+        return replaceByPasting(text)
     }
 
     func focusedApplicationBundleIdentifier() -> String? {
@@ -717,7 +725,8 @@ final class AccessibilityTextController {
         return settable.boolValue
     }
 
-    private func replaceByPasting(_ text: String) {
+    @discardableResult
+    private func replaceByPasting(_ text: String) -> Bool {
         let pasteboard = NSPasteboard.general
         let previousItems = pasteboard.pasteboardItems?.compactMap { item -> NSPasteboardItem? in
             let copy = NSPasteboardItem()
@@ -730,10 +739,15 @@ final class AccessibilityTextController {
         }
 
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        guard pasteboard.setString(text, forType: .string) else {
+            DiagnosticLog.write("replace paste failed, pasteboard rejected string")
+            return false
+        }
 
         sendKey(.maskCommand, virtualKey: 0)
+        Thread.sleep(forTimeInterval: 0.04)
         sendKey(.maskCommand, virtualKey: 9)
+        DiagnosticLog.write("replace paste issued, length=\(text.count)")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             if let previousItems {
@@ -741,6 +755,8 @@ final class AccessibilityTextController {
                 pasteboard.writeObjects(previousItems)
             }
         }
+
+        return true
     }
 
     private func sendKey(_ modifier: CGEventFlags, virtualKey: CGKeyCode) {
