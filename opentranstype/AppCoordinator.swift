@@ -37,6 +37,8 @@ enum DiagnosticLog {
 
 @MainActor
 final class AppCoordinator: NSObject, NSApplicationDelegate {
+    private static let maximumAutomaticTextLength = 2_000
+
     private let model = TranslatorModel()
     private let accessibility = AccessibilityTextController()
     private var overlayController: OverlayWindowController?
@@ -184,6 +186,11 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else {
             DiagnosticLog.write("observed text empty")
+            return
+        }
+
+        guard trimmedText.count <= Self.maximumAutomaticTextLength else {
+            DiagnosticLog.write("observed text ignored too long, length=\(trimmedText.count), element=\(accessibility.focusedElementDebugSummary())")
             return
         }
 

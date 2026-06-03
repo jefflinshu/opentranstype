@@ -62,9 +62,6 @@ final class TranslatorModel: ObservableObject {
     func requestTranslation(for text: String, force: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isEnabled, !trimmed.isEmpty, force || trimmed != lastRequestedText else {
-            if isEnabled, !trimmed.isEmpty {
-                DiagnosticLog.write("translation skipped duplicate, length=\(trimmed.count)")
-            }
             return
         }
 

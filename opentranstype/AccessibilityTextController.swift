@@ -3,6 +3,8 @@ import ApplicationServices
 
 @MainActor
 final class AccessibilityTextController {
+    private static let maximumAutomaticTextLength = 2_000
+
     private var focusedElement: AXUIElement?
     private var observer: AXObserver?
     private var observedApplication: AXUIElement?
@@ -456,6 +458,12 @@ final class AccessibilityTextController {
             }
 
             guard text != self.lastPublishedText else {
+                return
+            }
+
+            guard text.count <= Self.maximumAutomaticTextLength else {
+                DiagnosticLog.write("AX publish ignored too long, length=\(text.count), element=\(self.focusedElementDebugSummary())")
+                self.lastPublishedText = text
                 return
             }
 
