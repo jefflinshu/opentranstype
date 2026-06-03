@@ -83,6 +83,7 @@ final class OverlayWindowController {
         }
 
         if accessibility.replaceFocusedText(with: model.translatedText) {
+            model.recordAppliedTranslation()
             model.updateSourceText(model.translatedText)
         } else {
             model.statusText = "替换失败"

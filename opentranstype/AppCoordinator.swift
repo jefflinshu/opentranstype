@@ -44,6 +44,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private static let maximumAutomaticTextLength = 2_000
     private static let maximumManualTextLength = 2_000
     private static let ignoredCapturedTexts: Set<String> = [
+        "要求后续变更",
         "Require follow-up changes"
     ]
 

@@ -212,8 +212,12 @@ final class TranslatorModel: ObservableObject {
 
         translatedText = result
         statusText = "按 ↓ 覆盖原文"
-        historyStore?.recordTranslation(sourceText: sourceText, translatedText: result, targetLanguage: selectedLanguage)
         DiagnosticLog.write("translation finished id=\(requestID), resultLength=\(result.count)")
+    }
+
+    func recordAppliedTranslation() {
+        historyStore?.recordTranslation(sourceText: sourceText, translatedText: translatedText, targetLanguage: selectedLanguage)
+        DiagnosticLog.write("translation history recorded on apply, sourceLength=\(sourceText.count), resultLength=\(translatedText.count)")
     }
 
     func beginTranslationIfCurrent(requestID: Int) {

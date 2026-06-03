@@ -40,6 +40,7 @@ final class TranslationHistoryStore: ObservableObject {
     private static let liveInputMergeInterval: TimeInterval = 120
     private static let saveQueue = DispatchQueue(label: "com.curisaas.opentranstype.translation-history")
     private static let ignoredSourceTexts: Set<String> = [
+        "要求后续变更",
         "Require follow-up changes"
     ]
 
@@ -70,7 +71,8 @@ final class TranslationHistoryStore: ObservableObject {
         guard !trimmedSource.isEmpty, !trimmedTranslation.isEmpty else {
             return
         }
-        guard !Self.shouldIgnoreSourceText(trimmedSource) else {
+        guard !Self.shouldIgnoreText(trimmedSource),
+              !Self.shouldIgnoreText(trimmedTranslation) else {
             return
         }
 
@@ -122,8 +124,8 @@ final class TranslationHistoryStore: ObservableObject {
             || record.sourceText.hasPrefix(latestRecord.sourceText)
     }
 
-    private static func shouldIgnoreSourceText(_ sourceText: String) -> Bool {
-        ignoredSourceTexts.contains(normalizedText(sourceText))
+    private static func shouldIgnoreText(_ text: String) -> Bool {
+        ignoredSourceTexts.contains(normalizedText(text))
     }
 
     private static func normalizedText(_ text: String) -> String {
@@ -139,7 +141,7 @@ final class TranslationHistoryStore: ObservableObject {
         }
 
         return records
-            .filter { !shouldIgnoreSourceText($0.sourceText) }
+            .filter { !shouldIgnoreText($0.sourceText) && !shouldIgnoreText($0.translatedText) }
             .sorted { $0.createdAt > $1.createdAt }
     }
 }
