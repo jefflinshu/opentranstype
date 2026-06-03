@@ -23,6 +23,10 @@ final class OverlayWindowController {
         self.onRefresh = onRefresh
     }
 
+    var isVisible: Bool {
+        window?.isVisible == true
+    }
+
     func show(near axFrame: CGRect?) {
         userMovedWindow = false
 

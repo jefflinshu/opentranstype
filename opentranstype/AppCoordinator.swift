@@ -475,7 +475,9 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         lastAutomaticText = text
         accessibility.observeCurrentFocusedElement()
         model.enable()
-        overlayController?.show(near: accessibility.focusedElementFrame())
+        if overlayController?.isVisible != true {
+            overlayController?.show(near: accessibility.focusedElementFrame())
+        }
         model.updateSourceText(text)
         DiagnosticLog.write("\(source) text accepted, length=\(text.count), element=\(accessibility.focusedElementDebugSummary())")
         return true
