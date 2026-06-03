@@ -37,6 +37,7 @@ struct TranslationStats {
 final class TranslationHistoryStore: ObservableObject {
     private static let recordsKey = "translationHistoryRecords"
     private static let maximumRecordCount = 300
+    private static let liveInputMergeInterval: TimeInterval = 120
 
     @Published private(set) var records: [TranslationRecord] = []
 
@@ -71,6 +72,13 @@ final class TranslationHistoryStore: ObservableObject {
             translatedText: trimmedTranslation,
             targetLanguage: targetLanguage
         )
+
+        if shouldReplaceLatestRecord(with: record) {
+            records[0] = record
+            saveRecords()
+            return
+        }
+
         records.insert(record, at: 0)
         if records.count > Self.maximumRecordCount {
             records.removeLast(records.count - Self.maximumRecordCount)
@@ -89,6 +97,17 @@ final class TranslationHistoryStore: ObservableObject {
         }
 
         UserDefaults.standard.set(data, forKey: Self.recordsKey)
+    }
+
+    private func shouldReplaceLatestRecord(with record: TranslationRecord) -> Bool {
+        guard let latestRecord = records.first,
+              latestRecord.targetLanguageID == record.targetLanguageID,
+              record.createdAt.timeIntervalSince(latestRecord.createdAt) <= Self.liveInputMergeInterval else {
+            return false
+        }
+
+        return latestRecord.sourceText.hasPrefix(record.sourceText)
+            || record.sourceText.hasPrefix(latestRecord.sourceText)
     }
 
     private static func loadRecords() -> [TranslationRecord] {
