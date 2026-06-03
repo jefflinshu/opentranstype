@@ -30,8 +30,6 @@ enum DiagnosticLog {
         } catch {
             NSLog("OpenTransType diagnostics log failed: \(error.localizedDescription)")
         }
-
-        NSLog("OpenTransType: \(message)")
     }
 }
 
