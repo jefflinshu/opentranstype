@@ -104,9 +104,16 @@ final class TranslatorModel: ObservableObject {
 
                 let response = try await session.translate(trimmed)
                 await self?.finishTranslation(requestID: currentRequestID, result: response.targetText)
+            } catch is CancellationError {
+                DiagnosticLog.write("translation cancelled id=\(currentRequestID)")
             } catch {
-                await self?.failTranslation(error)
+                await self?.failTranslation(requestID: currentRequestID, error)
             }
+        }
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            self?.resetIfStillTranslating(requestID: currentRequestID)
         }
     }
 
@@ -121,11 +128,27 @@ final class TranslatorModel: ObservableObject {
         DiagnosticLog.write("translation finished id=\(requestID), resultLength=\(result.count)")
     }
 
-    func failTranslation(_ error: Error) {
+    func failTranslation(requestID: Int, _ error: Error) {
+        guard requestID == self.requestID else {
+            DiagnosticLog.write("translation failure ignored stale id=\(requestID), current=\(self.requestID)")
+            return
+        }
+
         translatedText = ""
         let nsError = error as NSError
         statusText = nsError.domain == "Translation.TranslationError" ? "需安装\(selectedLanguage.name)语言包" : "翻译失败，稍后重试"
         DiagnosticLog.write("translation failed: \(error.localizedDescription), domain=\(nsError.domain), code=\(nsError.code)")
+    }
+
+    func resetIfStillTranslating(requestID: Int) {
+        guard requestID == self.requestID,
+              translatedText.isEmpty,
+              statusText == "翻译中..." else {
+            return
+        }
+
+        statusText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "正在监听输入" : "等待输入"
+        DiagnosticLog.write("translation timed out id=\(requestID)")
     }
 
     func forceTranslation(for text: String) {
