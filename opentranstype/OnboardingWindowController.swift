@@ -25,13 +25,9 @@ final class OnboardingWindowController {
             )
 
             let hostingView = NSHostingView(rootView: contentView)
-            hostingView.wantsLayer = true
-            hostingView.layer?.cornerRadius = 18
-            hostingView.layer?.masksToBounds = true
-
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 460, height: 420),
-                styleMask: [.titled, .fullSizeContentView],
+                contentRect: NSRect(x: 0, y: 0, width: 920, height: 660),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
@@ -39,10 +35,11 @@ final class OnboardingWindowController {
             window.title = "OpenTransType"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
-            window.backgroundColor = .clear
+            window.backgroundColor = .windowBackgroundColor
             window.isOpaque = false
             window.hasShadow = true
             window.isReleasedWhenClosed = false
+            window.minSize = NSSize(width: 820, height: 600)
             window.center()
             WindowChrome.placeTrafficLightsInsidePanel(window)
             resizeObserver = NotificationCenter.default.addObserver(
@@ -81,43 +78,61 @@ struct OnboardingView: View {
     @State private var languageTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                instructionsPage
-                    .opacity(page == 0 ? 1 : 0)
-                    .allowsHitTesting(page == 0)
+        ZStack {
+            OnboardingBackdropView()
+                .blur(radius: 1)
 
-                languagePage
-                    .opacity(page == 1 ? 1 : 0)
-                    .allowsHitTesting(page == 1)
-            }
-            .animation(.easeInOut(duration: 0.16), value: page)
+            Color.black.opacity(0.18)
 
-            HStack {
-                pageIndicator
+            VStack(spacing: 0) {
+                ZStack {
+                    instructionsPage
+                        .opacity(page == 0 ? 1 : 0)
+                        .allowsHitTesting(page == 0)
 
-                Spacer()
-
-                if page == 0 {
-                    Button("下一步") {
-                        refreshAccessibilityTrust()
-                        page = 1
-                    }
-                    .disabled(!isAccessibilityTrusted)
-                    .keyboardShortcut(.defaultAction)
-                } else {
-                    Button("开始使用") {
-                        onFinish()
-                    }
-                    .disabled(!languagePackState.canContinue)
-                    .keyboardShortcut(.defaultAction)
+                    languagePage
+                        .opacity(page == 1 ? 1 : 0)
+                        .allowsHitTesting(page == 1)
                 }
+                .animation(.easeInOut(duration: 0.16), value: page)
+
+                HStack {
+                    pageIndicator
+
+                    Spacer()
+
+                    if page == 0 {
+                        Button("下一步") {
+                            refreshAccessibilityTrust()
+                            page = 1
+                        }
+                        .disabled(!isAccessibilityTrusted)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                    } else {
+                        Button("开始使用") {
+                            onFinish()
+                        }
+                        .disabled(!languagePackState.canContinue)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                    }
+                }
+                .padding(.horizontal, 48)
+                .padding(.bottom, 36)
             }
-            .padding(.horizontal, 28)
-            .padding(.bottom, 24)
+            .frame(width: 540, height: 560)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(.secondary.opacity(0.22), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.18), radius: 28, x: 0, y: 18)
         }
-        .frame(width: 460, height: 420)
-        .liquidGlassPanel(cornerRadius: 18)
+        .ignoresSafeArea()
+        .frame(minWidth: 820, minHeight: 600)
         .onAppear {
             refreshAccessibilityTrust()
             checkLanguagePack()
@@ -131,28 +146,27 @@ struct OnboardingView: View {
     }
 
     private var instructionsPage: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Image(systemName: "text.bubble")
-                .font(.system(size: 42))
-                .foregroundStyle(.tint)
+        VStack(alignment: .leading, spacing: 28) {
+            OnboardingAppMark()
+                .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("边写边译")
-                    .font(.largeTitle.weight(.semibold))
+                Text("欢迎使用")
+                    .font(.title.weight(.bold))
+                    .foregroundStyle(.tint)
 
-                Text("在任意 App 的输入框里输入文字，OpenTransType 会读取当前内容并显示译文。按下 ↓ 或浮窗里的向下箭头，就可以用译文覆盖原文。")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text("OpenTransType")
+                    .font(.largeTitle.weight(.bold))
             }
+            .padding(.top, 8)
 
-            VStack(alignment: .leading, spacing: 12) {
-                OnboardingStepRow(iconName: "cursorarrow.rays", text: "右键输入框可手动唤出翻译浮窗")
-                OnboardingStepRow(iconName: "keyboard.chevron.compact.down", text: "译文准备好后按 ↓ 直接替换")
+            VStack(alignment: .leading, spacing: 22) {
+                OnboardingStepRow(iconName: "cursorarrow.rays", text: "在任意 App 的输入框里输入文字，并自动显示译文。")
+                OnboardingStepRow(iconName: "keyboard.chevron.compact.down", text: "译文准备好后，按 ↓ 或点击浮窗按钮直接替换原文。")
                 OnboardingStepRow(iconName: "lock.shield", text: accessibilityStatusText)
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Button("打开辅助功能设置") {
                     requestAccessibilityPermission()
                 }
@@ -164,18 +178,18 @@ struct OnboardingView: View {
 
             Spacer()
         }
-        .padding(28)
+        .padding(.horizontal, 64)
+        .padding(.top, 54)
     }
 
     private var languagePage: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Image(systemName: "square.and.arrow.down")
-                .font(.system(size: 42))
-                .foregroundStyle(.tint)
+        VStack(alignment: .leading, spacing: 24) {
+            OnboardingAppMark()
+                .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("选择目标语言")
-                    .font(.largeTitle.weight(.semibold))
+                    .font(.largeTitle.weight(.bold))
 
                 Text("选择你最常翻译到的语言。首次使用对应语言对时，系统可能会提示下载 Apple 本机翻译语言包。")
                     .font(.body)
@@ -213,6 +227,7 @@ struct OnboardingView: View {
                         prepareLanguagePack()
                     }
                     .disabled(!languagePackState.canPrepare)
+                    .buttonStyle(.bordered)
 
                     Button("重新检查") {
                         checkLanguagePack()
@@ -221,11 +236,12 @@ struct OnboardingView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassPanel(cornerRadius: 10)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             Spacer()
         }
-        .padding(28)
+        .padding(.horizontal, 64)
+        .padding(.top, 54)
     }
 
     private var accessibilityStatusText: String {
@@ -423,20 +439,120 @@ private enum LanguagePackState: Equatable {
     }
 }
 
+private struct OnboardingBackdropView: View {
+    var body: some View {
+        NavigationSplitView {
+            List(selection: .constant("stats")) {
+                Section("OpenTransType") {
+                    Label("数据统计", systemImage: "chart.bar.xaxis")
+                        .tag("stats")
+                    Label("历史记录", systemImage: "clock.arrow.circlepath")
+                        .tag("history")
+                    Label("设置", systemImage: "gearshape")
+                        .tag("settings")
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(230)
+        } detail: {
+            VStack(alignment: .leading, spacing: 28) {
+                HStack {
+                    Text("数据统计")
+                        .font(.system(size: 34, weight: .bold))
+
+                    Spacer()
+
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 44, height: 44)
+                        .background(.thinMaterial, in: Circle())
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                        Text("搜索")
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 18)
+                    .frame(width: 260, height: 44)
+                    .background(.thinMaterial, in: Capsule())
+                }
+
+                LazyVGrid(columns: [
+                    GridItem(.flexible(), spacing: 18),
+                    GridItem(.flexible(), spacing: 18)
+                ], spacing: 18) {
+                    ForEach(["翻译次数", "原文字数", "译文字数", "平均长度"], id: \.self) { title in
+                        VStack(alignment: .leading, spacing: 12) {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.secondary.opacity(0.10))
+                                .frame(height: 96)
+
+                            Text(title)
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.top, 64)
+            .padding(.horizontal, 44)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .tint(.purple)
+        .disabled(true)
+    }
+}
+
+private struct OnboardingAppMark: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.17, green: 0.18, blue: 0.32),
+                            Color(red: 0.08, green: 0.09, blue: 0.17)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .black.opacity(0.25), radius: 10, x: 0, y: 5)
+
+            Image(systemName: "character.bubble.fill")
+                .font(.system(size: 42, weight: .semibold))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [.purple, .blue, .red],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .frame(width: 72, height: 72)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct OnboardingStepRow: View {
     let iconName: String
     let text: String
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .center, spacing: 22) {
             Image(systemName: iconName)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(.tint)
-                .frame(width: 24)
+                .frame(width: 48)
 
             Text(text)
                 .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.callout)
+        .font(.body.weight(.medium))
     }
 }
