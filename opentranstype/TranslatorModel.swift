@@ -91,6 +91,25 @@ final class TranslatorModel: ObservableObject {
         translationTask?.cancel()
         translationTask = Task { [weak self] in
             do {
+                let availability: LanguageAvailability
+                if #available(macOS 26.4, *) {
+                    availability = LanguageAvailability(preferredStrategy: .lowLatency)
+                } else {
+                    availability = LanguageAvailability()
+                }
+
+                let status = await availability.status(from: sourceLanguage.language, to: targetLanguage)
+                switch status {
+                case .installed:
+                    break
+                case .supported:
+                    await self?.markLanguagePackUnavailable(requestID: currentRequestID, sourceID: sourceLanguage.id)
+                    return
+                case .unsupported:
+                    await self?.markUnsupportedLanguagePair(requestID: currentRequestID, sourceID: sourceLanguage.id)
+                    return
+                }
+
                 let session: TranslationSession
                 if #available(macOS 26.4, *) {
                     session = TranslationSession(
@@ -128,6 +147,26 @@ final class TranslatorModel: ObservableObject {
         DiagnosticLog.write("translation finished id=\(requestID), resultLength=\(result.count)")
     }
 
+    func markLanguagePackUnavailable(requestID: Int, sourceID: String) {
+        guard requestID == self.requestID else {
+            return
+        }
+
+        translatedText = ""
+        statusText = "语言包未就绪"
+        DiagnosticLog.write("translation language pack unavailable id=\(requestID), source=\(sourceID), target=\(selectedLanguage.id)")
+    }
+
+    func markUnsupportedLanguagePair(requestID: Int, sourceID: String) {
+        guard requestID == self.requestID else {
+            return
+        }
+
+        translatedText = ""
+        statusText = "不支持该语言对"
+        DiagnosticLog.write("translation unsupported pair id=\(requestID), source=\(sourceID), target=\(selectedLanguage.id)")
+    }
+
     func failTranslation(requestID: Int, _ error: Error) {
         guard requestID == self.requestID else {
             DiagnosticLog.write("translation failure ignored stale id=\(requestID), current=\(self.requestID)")
@@ -136,7 +175,7 @@ final class TranslatorModel: ObservableObject {
 
         translatedText = ""
         let nsError = error as NSError
-        statusText = nsError.domain == "Translation.TranslationError" ? "需安装\(selectedLanguage.name)语言包" : "翻译失败，稍后重试"
+        statusText = nsError.domain == "Translation.TranslationError" ? "暂时无法翻译" : "翻译失败，稍后重试"
         DiagnosticLog.write("translation failed: \(error.localizedDescription), domain=\(nsError.domain), code=\(nsError.code)")
     }
 
