@@ -13,6 +13,7 @@ final class AccessibilityTextController {
     private var textChangeTask: Task<Void, Never>?
     private var onTextChange: ((String) -> Void)?
     private var lastPublishedText = ""
+    private var lastDiagnosticsAt = Date.distantPast
 
     var hasFocusedElement: Bool {
         focusedElement != nil
@@ -60,7 +61,6 @@ final class AccessibilityTextController {
             observeTextElement(focusedElement)
             publishTextChange(from: focusedElement, debounce: .milliseconds(80))
         } else {
-            DiagnosticLog.write("AX no focused element after frontmost refresh")
             logFocusedElementDiagnostics(reason: "frontmost refresh miss")
         }
     }
@@ -93,7 +93,6 @@ final class AccessibilityTextController {
         }
 
         focusedElement = nil
-        DiagnosticLog.write("AX focused element not found")
         logFocusedElementDiagnostics(reason: "focused editable miss")
         return false
     }
@@ -174,6 +173,11 @@ final class AccessibilityTextController {
         guard isTrusted else {
             return
         }
+
+        guard Date().timeIntervalSince(lastDiagnosticsAt) > 5 else {
+            return
+        }
+        lastDiagnosticsAt = Date()
 
         let systemElement = AXUIElementCreateSystemWide()
         var value: CFTypeRef?
