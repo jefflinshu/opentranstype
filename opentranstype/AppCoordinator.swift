@@ -41,6 +41,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private let model = TranslatorModel()
     private let accessibility = AccessibilityTextController()
     private var overlayController: OverlayWindowController?
+    private var onboardingController: OnboardingWindowController?
     private var rightMouseMonitor: Any?
     private var activeApplicationObserver: NSObjectProtocol?
     private var keyEventTap: CFMachPort?
@@ -50,11 +51,15 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var lastFrontmostPID: pid_t = 0
     private var frontmostMonitorTick = 0
     private var lastAXMissLogAt = Date.distantPast
+    private var didStartTranslationExperience = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard claimSingleRunningInstance() else {
+            return
+        }
+
         DiagnosticLog.reset()
-        DiagnosticLog.write("app launched, trusted=\(accessibility.isTrusted), log=\(DiagnosticLog.url.path)")
-        NSApp.setActivationPolicy(.accessory)
+        DiagnosticLog.write("app launched pid=\(getpid()), trusted=\(accessibility.isTrusted), log=\(DiagnosticLog.url.path)")
         overlayController = OverlayWindowController(
             model: model,
             accessibility: accessibility,
@@ -64,6 +69,45 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
                 }
             }
         )
+
+        if UserDefaults.standard.bool(forKey: OnboardingView.didCompleteKey) {
+            startTranslationExperience()
+        } else {
+            onboardingController = OnboardingWindowController(model: model) { [weak self] in
+                self?.startTranslationExperience()
+            }
+            onboardingController?.show()
+            DiagnosticLog.write("onboarding shown")
+        }
+    }
+
+    private func claimSingleRunningInstance() -> Bool {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            return true
+        }
+
+        let currentPID = getpid()
+        let existingApplication = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first { $0.processIdentifier != currentPID && !$0.isTerminated }
+
+        guard let existingApplication else {
+            return true
+        }
+
+        DiagnosticLog.write("duplicate instance pid=\(currentPID) exiting, existing pid=\(existingApplication.processIdentifier)")
+        existingApplication.activate()
+        NSApp.terminate(nil)
+        return false
+    }
+
+    private func startTranslationExperience() {
+        guard !didStartTranslationExperience else {
+            return
+        }
+
+        didStartTranslationExperience = true
+        NSApp.setActivationPolicy(.accessory)
         accessibility.requestPermission()
         installActiveApplicationObserver()
         startFrontmostApplicationMonitor()

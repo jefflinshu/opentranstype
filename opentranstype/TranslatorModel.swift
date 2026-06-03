@@ -5,12 +5,15 @@ import Translation
 
 @MainActor
 final class TranslatorModel: ObservableObject {
+    private static let selectedLanguageIDKey = "selectedLanguageID"
+
     @Published var isEnabled = true
     @Published var sourceText = ""
     @Published var translatedText = ""
     @Published var statusText = "正在监听输入"
-    @Published var selectedLanguage = TranslationLanguage.supported[0] {
+    @Published var selectedLanguage: TranslationLanguage {
         didSet {
+            UserDefaults.standard.set(selectedLanguage.id, forKey: Self.selectedLanguageIDKey)
             requestTranslation(for: sourceText)
         }
     }
@@ -19,6 +22,16 @@ final class TranslatorModel: ObservableObject {
     private var lastRequestedText = ""
     private var translationTask: Task<Void, Never>?
     private let translationDebounce: Duration = .milliseconds(350)
+    private let translationTimeout: Duration = .seconds(8)
+
+    init() {
+        if let savedLanguageID = UserDefaults.standard.string(forKey: Self.selectedLanguageIDKey),
+           let savedLanguage = TranslationLanguage.supported.first(where: { $0.id == savedLanguageID }) {
+            selectedLanguage = savedLanguage
+        } else {
+            selectedLanguage = TranslationLanguage.supported[0]
+        }
+    }
 
     var canApplyTranslation: Bool {
         !translatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -68,13 +81,22 @@ final class TranslatorModel: ObservableObject {
 
         lastRequestedText = trimmed
         translatedText = ""
-        statusText = "等待输入"
         requestID += 1
         let currentRequestID = requestID
         DiagnosticLog.write("translation requested id=\(currentRequestID), length=\(trimmed.count), target=\(selectedLanguage.name)")
 
+        guard isReadyForTranslation(trimmed, force: force) else {
+            translationTask?.cancel()
+            translationTask = nil
+            statusText = "继续输入"
+            DiagnosticLog.write("translation skipped short text id=\(currentRequestID), length=\(trimmed.count)")
+            return
+        }
+
+        statusText = "等待输入"
+
         guard let sourceLanguage = detectedSourceLanguage(for: trimmed) else {
-            statusText = "无法识别语言"
+            statusText = "继续输入"
             DiagnosticLog.write("translation skipped, source language unresolved")
             return
         }
@@ -92,8 +114,12 @@ final class TranslatorModel: ObservableObject {
         translationTask?.cancel()
         translationTask = Task { [weak self] in
             do {
-                try await Task.sleep(for: translationDebounce)
-                await self?.beginTranslationIfCurrent(requestID: currentRequestID)
+                guard let self else {
+                    return
+                }
+
+                try await Task.sleep(for: self.translationDebounce)
+                self.beginTranslationIfCurrent(requestID: currentRequestID)
 
                 let availability: LanguageAvailability
                 if #available(macOS 26.4, *) {
@@ -103,15 +129,18 @@ final class TranslatorModel: ObservableObject {
                 }
 
                 let status = await availability.status(from: sourceLanguage.language, to: targetLanguage)
-                DiagnosticLog.write("translation availability id=\(currentRequestID), source=\(sourceLanguage.id), target=\(selectedLanguage.id), status=\(status)")
+                DiagnosticLog.write("translation availability id=\(currentRequestID), source=\(sourceLanguage.id), target=\(self.selectedLanguage.id), status=\(status)")
                 switch status {
                 case .installed:
                     break
                 case .supported:
-                    await self?.markLanguagePackUnavailable(requestID: currentRequestID, sourceID: sourceLanguage.id)
+                    self.markLanguagePackUnavailable(requestID: currentRequestID, sourceID: sourceLanguage.id)
                     return
                 case .unsupported:
-                    await self?.markUnsupportedLanguagePair(requestID: currentRequestID, sourceID: sourceLanguage.id)
+                    self.markUnsupportedLanguagePair(requestID: currentRequestID, sourceID: sourceLanguage.id)
+                    return
+                @unknown default:
+                    self.markUnsupportedLanguagePair(requestID: currentRequestID, sourceID: sourceLanguage.id)
                     return
                 }
 
@@ -127,17 +156,21 @@ final class TranslatorModel: ObservableObject {
                 }
 
                 let response = try await session.translate(trimmed)
-                await self?.finishTranslation(requestID: currentRequestID, result: response.targetText)
+                self.finishTranslation(requestID: currentRequestID, result: response.targetText)
             } catch is CancellationError {
                 DiagnosticLog.write("translation cancelled id=\(currentRequestID)")
             } catch {
-                await self?.failTranslation(requestID: currentRequestID, error)
+                self?.failTranslation(requestID: currentRequestID, error)
             }
         }
 
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            self?.resetIfStillTranslating(requestID: currentRequestID)
+            guard let self else {
+                return
+            }
+
+            try? await Task.sleep(for: self.translationTimeout)
+            self.resetIfStillTranslating(requestID: currentRequestID)
         }
     }
 
@@ -201,6 +234,8 @@ final class TranslatorModel: ObservableObject {
         }
 
         statusText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "正在监听输入" : "等待输入"
+        translationTask?.cancel()
+        translationTask = nil
         DiagnosticLog.write("translation timed out id=\(requestID)")
     }
 
@@ -221,5 +256,21 @@ final class TranslatorModel: ObservableObject {
         }
 
         return (language.rawValue, Locale.Language(identifier: language.rawValue))
+    }
+
+    private func isReadyForTranslation(_ text: String, force: Bool) -> Bool {
+        let hanCharacters = text
+            .matches(of: /\p{Han}/)
+            .count
+        if hanCharacters > 0 {
+            return force ? hanCharacters >= 1 : hanCharacters >= 2
+        }
+
+        let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+        if force {
+            return letters >= 2 || text.count >= 4
+        }
+
+        return letters >= 4 || text.count >= 6
     }
 }
