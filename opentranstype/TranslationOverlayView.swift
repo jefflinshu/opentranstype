@@ -20,6 +20,10 @@ struct TranslationOverlayView: View {
     var body: some View {
         GeometryReader { proxy in
             HStack(alignment: .top, spacing: 10) {
+                DragHandle(onDrag: onDrag, onDragEnded: onDragEnded)
+                    .frame(width: 16, height: 24)
+                    .help("拖拽移动工具栏")
+
                 LanguagePopUpButton(selection: $model.selectedLanguage)
                     .frame(width: 46, height: 22)
                     .help("选择目标语言")
@@ -31,10 +35,13 @@ struct TranslationOverlayView: View {
                     .truncationMode(.tail)
                     .textSelection(.enabled)
                     .frame(
+                        minWidth: 0,
                         maxWidth: .infinity,
                         minHeight: Layout.singleLineTextHeight,
                         alignment: .topTrailing
                     )
+                    .clipped()
+                    .layoutPriority(0)
 
                 Button(action: applyOrRefresh) {
                     Image(systemName: "arrow.down")
@@ -43,6 +50,7 @@ struct TranslationOverlayView: View {
                 }
                 .buttonStyle(.plain)
                 .help(model.canApplyTranslation ? "覆盖原文" : "读取当前输入")
+                .layoutPriority(2)
 
                 Button(action: onClose) {
                     Image(systemName: "xmark")
@@ -51,24 +59,17 @@ struct TranslationOverlayView: View {
                 }
                 .buttonStyle(.plain)
                 .help("关闭")
+                .layoutPriority(2)
             }
             .padding(.leading, 13)
-            .padding(.trailing, 16)
+            .padding(.trailing, 38)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottomTrailing) {
-                ResizeGrip()
-                    .padding(.trailing, 5)
-                    .padding(.bottom, 5)
-                    .gesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { value in
-                                onResize(value.translation)
-                            }
-                            .onEnded { _ in
-                                onResizeEnded()
-                            }
-                    )
+                ResizeGrip(onResize: onResize, onResizeEnded: onResizeEnded)
+                    .frame(width: 28, height: 28)
+                    .padding(.trailing, 2)
+                    .padding(.bottom, 2)
                     .help("拖拽调整工具栏大小")
             }
         }
@@ -94,14 +95,154 @@ struct TranslationOverlayView: View {
     }
 }
 
-private struct ResizeGrip: View {
-    var body: some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: 8, weight: .semibold))
-            .foregroundStyle(.secondary.opacity(0.55))
-            .rotationEffect(.degrees(-45))
-            .frame(width: 14, height: 14)
-            .contentShape(Rectangle())
+private struct DragHandle: NSViewRepresentable {
+    let onDrag: (CGSize) -> Void
+    let onDragEnded: () -> Void
+
+    func makeNSView(context: Context) -> DragHandleView {
+        let view = DragHandleView()
+        view.onDrag = onDrag
+        view.onDragEnded = onDragEnded
+        return view
+    }
+
+    func updateNSView(_ view: DragHandleView, context: Context) {
+        view.onDrag = onDrag
+        view.onDragEnded = onDragEnded
+    }
+
+    final class DragHandleView: NSView {
+        var onDrag: ((CGSize) -> Void)?
+        var onDragEnded: (() -> Void)?
+        private var dragStartLocation: NSPoint?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .openHand)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            dragStartLocation = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+            NSCursor.closedHand.set()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let dragStartLocation else {
+                return
+            }
+
+            let currentLocation = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+            onDrag?(CGSize(
+                width: currentLocation.x - dragStartLocation.x,
+                height: dragStartLocation.y - currentLocation.y
+            ))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            dragStartLocation = nil
+            onDragEnded?()
+            NSCursor.openHand.set()
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            super.draw(dirtyRect)
+            NSColor.secondaryLabelColor.withAlphaComponent(0.45).setFill()
+
+            for row in 0..<3 {
+                for column in 0..<2 {
+                    let rect = NSRect(
+                        x: bounds.midX - 4 + CGFloat(column * 5),
+                        y: bounds.midY - 6 + CGFloat(row * 5),
+                        width: 2,
+                        height: 2
+                    )
+                    NSBezierPath(ovalIn: rect).fill()
+                }
+            }
+        }
+    }
+}
+
+private struct ResizeGrip: NSViewRepresentable {
+    let onResize: (CGSize) -> Void
+    let onResizeEnded: () -> Void
+
+    func makeNSView(context: Context) -> ResizeGripView {
+        let view = ResizeGripView()
+        view.onResize = onResize
+        view.onResizeEnded = onResizeEnded
+        return view
+    }
+
+    func updateNSView(_ view: ResizeGripView, context: Context) {
+        view.onResize = onResize
+        view.onResizeEnded = onResizeEnded
+    }
+
+    final class ResizeGripView: NSView {
+        var onResize: ((CGSize) -> Void)?
+        var onResizeEnded: (() -> Void)?
+        private var dragStartLocation: NSPoint?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            dragStartLocation = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let dragStartLocation else {
+                return
+            }
+
+            let currentLocation = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+            onResize?(CGSize(
+                width: currentLocation.x - dragStartLocation.x,
+                height: dragStartLocation.y - currentLocation.y
+            ))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            dragStartLocation = nil
+            onResizeEnded?()
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            super.draw(dirtyRect)
+            NSColor.secondaryLabelColor.withAlphaComponent(0.55).setStroke()
+
+            let path = NSBezierPath()
+            path.lineWidth = 1.5
+            path.lineCapStyle = .round
+
+            let startX = bounds.maxX - 12
+            let startY = bounds.minY + 6
+            for offset in stride(from: 0, through: 8, by: 4) {
+                path.move(to: NSPoint(x: startX + CGFloat(offset), y: startY))
+                path.line(to: NSPoint(x: bounds.maxX - 6, y: startY + CGFloat(offset)))
+            }
+
+            path.stroke()
+        }
     }
 }
 

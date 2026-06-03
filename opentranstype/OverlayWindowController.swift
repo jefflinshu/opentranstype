@@ -57,7 +57,7 @@ final class OverlayWindowController {
             panel.hasShadow = false
             panel.titleVisibility = .hidden
             panel.titlebarAppearsTransparent = true
-            panel.isMovableByWindowBackground = true
+            panel.isMovableByWindowBackground = false
             window = panel
         }
 
