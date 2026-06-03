@@ -197,7 +197,25 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
         didStartTranslationExperience = true
         NSApp.setActivationPolicy(.regular)
-        accessibility.requestPermission()
+        model.enable()
+        model.statusText = "正在监听输入"
+        refreshStatusMenu()
+        dashboardController?.show()
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            startTranslationServicesAfterLaunch()
+        }
+    }
+
+    private func startTranslationServicesAfterLaunch() {
+        guard accessibility.isTrusted else {
+            model.statusText = "请在系统设置中允许辅助功能权限"
+            refreshStatusMenu()
+            DiagnosticLog.write("translation services deferred, accessibility not trusted")
+            return
+        }
+
         installActiveApplicationObserver()
         startFrontmostApplicationMonitor()
         accessibility.startObservingTextChanges { [weak self] text in
@@ -205,10 +223,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
         installRightClickMonitor()
         installKeyEventTap()
-        model.enable()
-        model.statusText = "正在监听输入"
-        refreshStatusMenu()
-        dashboardController?.show()
         overlayController?.show(near: nil)
         DiagnosticLog.write("overlay shown")
     }
