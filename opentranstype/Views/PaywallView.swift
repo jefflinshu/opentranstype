@@ -11,6 +11,7 @@ struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @ObservedObject var proManager: ProManager
+    var onClose: (() -> Void)?
 
     @State private var availableProducts: [Product] = []
     @State private var productLoadState: ProductLoadState = .loading
@@ -49,7 +50,11 @@ struct PaywallView: View {
             HStack {
                 Spacer()
                 Button {
-                    dismiss()
+                    if let onClose {
+                        onClose()
+                    } else {
+                        dismiss()
+                    }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3)
