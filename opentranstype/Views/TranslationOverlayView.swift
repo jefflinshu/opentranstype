@@ -12,7 +12,6 @@ struct TranslationOverlayView: View {
 
     @ObservedObject var model: TranslatorModel
     let onRefresh: () -> Void
-    let onUpgrade: () -> Void
     let onApply: () -> Void
     let onClose: () -> Void
     let onDrag: (CGSize) -> Void
@@ -41,12 +40,12 @@ struct TranslationOverlayView: View {
                     }
 
                     Button(action: applyOrRefresh) {
-                        Image(systemName: model.isUpgradeRequired ? "crown.fill" : "arrow.down")
+                        Image(systemName: "arrow.down")
                             .font(.system(size: 14, weight: .semibold))
                             .frame(width: 22, height: 22)
                     }
                     .buttonStyle(.plain)
-                    .help(toolbarButtonHelp)
+                    .help(model.canApplyTranslation ? String(localized: "Replace original text") : String(localized: "Read current input"))
                     .layoutPriority(2)
 
                     Button(action: onClose) {
@@ -111,24 +110,11 @@ struct TranslationOverlayView: View {
     }
 
     private func applyOrRefresh() {
-        if model.isUpgradeRequired {
-            onUpgrade()
-            return
-        }
-
         if model.canApplyTranslation {
             onApply()
         } else {
             onRefresh()
         }
-    }
-
-    private var toolbarButtonHelp: String {
-        if model.isUpgradeRequired {
-            return String(localized: "Upgrade to continue")
-        }
-
-        return model.canApplyTranslation ? String(localized: "Replace original text") : String(localized: "Read current input")
     }
 }
 

@@ -7,13 +7,8 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		6F0A00012FD1000000000001 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		6FE25D782FD029EE0085BA4D /* opentranstype.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = opentranstype.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
-
-/* Begin PBXBuildFile section */
-		6F0A00022FD1000000000002 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6F0A00012FD1000000000001 /* StoreKit.framework */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6FE25D7A2FD029EE0085BA4D /* opentranstype */ = {
@@ -28,7 +23,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6F0A00022FD1000000000002 /* StoreKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -39,7 +33,6 @@
 			isa = PBXGroup;
 			children = (
 				6FE25D7A2FD029EE0085BA4D /* opentranstype */,
-				6F0A00012FD1000000000001 /* StoreKit.framework */,
 				6FE25D792FD029EE0085BA4D /* Products */,
 			);
 			sourceTree = "<group>";

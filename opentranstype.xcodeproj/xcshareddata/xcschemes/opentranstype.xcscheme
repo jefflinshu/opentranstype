@@ -50,16 +50,6 @@
             ReferencedContainer = "container:opentranstype.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <AdditionalOptions>
-         <AdditionalOption
-            key = "APP_DISTRIBUTOR_ID_OVERRIDE"
-            value = "com.apple.AppStore"
-            isEnabled = "YES">
-         </AdditionalOption>
-      </AdditionalOptions>
-      <StoreKitConfigurationFileReference
-         identifier = "../../opentranstype/TranstypePro.storekit">
-      </StoreKitConfigurationFileReference>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

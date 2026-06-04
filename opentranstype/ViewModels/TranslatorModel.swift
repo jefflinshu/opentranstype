@@ -9,15 +9,12 @@ final class TranslatorModel: ObservableObject {
     private static let maximumTranslatableTextLength = 2_000
 
     private let historyStore: TranslationHistoryStore?
-    private let freeQuotaStore: FreeQuotaStore?
-    private let proManager: ProManager?
     private let languageCatalog: TranslationLanguageCatalog
 
     @Published var isEnabled = true
     @Published var sourceText = ""
     @Published var translatedText = ""
     @Published var statusText = String(localized: "Listening for input")
-    @Published var isUpgradeRequired = false
     @Published var selectedLanguage: TranslationLanguage {
         didSet {
             guard selectedLanguage != oldValue else {
@@ -39,14 +36,10 @@ final class TranslatorModel: ObservableObject {
 
     init(
         historyStore: TranslationHistoryStore? = nil,
-        freeQuotaStore: FreeQuotaStore? = nil,
-        proManager: ProManager? = nil,
         languageCatalog: TranslationLanguageCatalog? = nil
     ) {
         let languageCatalog = languageCatalog ?? .shared
         self.historyStore = historyStore
-        self.freeQuotaStore = freeQuotaStore
-        self.proManager = proManager
         self.languageCatalog = languageCatalog
         languageCatalog.loadIfNeeded()
 
@@ -75,16 +68,13 @@ final class TranslatorModel: ObservableObject {
 
     func enable() {
         isEnabled = true
-        if !isUpgradeRequired {
-            statusText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? String(localized: "Listening for input") : statusText
-        }
+        statusText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? String(localized: "Listening for input") : statusText
     }
 
     func disable() {
         isEnabled = false
         sourceText = ""
         translatedText = ""
-        isUpgradeRequired = false
         statusText = String(localized: "Paused")
         translationTask?.cancel()
         translationTask = nil
@@ -92,29 +82,8 @@ final class TranslatorModel: ObservableObject {
         requestID += 1
     }
 
-    func markUpgradeRequired() {
-        isEnabled = true
-        isUpgradeRequired = true
-        translatedText = ""
-        statusText = String(localized: "Free limit reached. Upgrade to continue.")
-        translationTask?.cancel()
-        translationTask = nil
-        requestID += 1
-    }
-
-    func clearUpgradeRequiredIfNeeded() {
-        guard isUpgradeRequired else {
-            return
-        }
-
-        isUpgradeRequired = false
-        statusText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? String(localized: "Listening for input")
-            : String(localized: "Ready")
-    }
-
     func updateSourceText(_ text: String) {
-        guard isEnabled, !isUpgradeRequired else {
+        guard isEnabled else {
             return
         }
 
@@ -135,7 +104,7 @@ final class TranslatorModel: ObservableObject {
 
     func requestTranslation(for text: String, force: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isEnabled, !isUpgradeRequired, !trimmed.isEmpty, force || trimmed != lastRequestedText else {
+        guard isEnabled, !trimmed.isEmpty, force || trimmed != lastRequestedText else {
             return
         }
 
@@ -290,12 +259,7 @@ final class TranslatorModel: ObservableObject {
 
     func recordAppliedTranslation() {
         historyStore?.recordTranslation(sourceText: sourceText, translatedText: translatedText, targetLanguage: selectedLanguage)
-        freeQuotaStore?.recordUsageIfNeeded(isPro: proManager?.isPro == true)
         DiagnosticLog.write("translation history recorded on apply, sourceLength=\(sourceText.count), resultLength=\(translatedText.count)")
-        if proManager?.isPro != true,
-           freeQuotaStore?.isLimitReached == true {
-            markUpgradeRequired()
-        }
     }
 
     func beginTranslationIfCurrent(requestID: Int) {

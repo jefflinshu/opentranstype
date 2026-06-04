@@ -1,6 +1,4 @@
 import AppKit
-import Combine
-import StoreKit
 import SwiftUI
 
 enum DiagnosticLog {
@@ -51,36 +49,28 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     ]
 
     private let historyStore: TranslationHistoryStore
-    private let freeQuotaStore: FreeQuotaStore
     private let model: TranslatorModel
-    private let proManager = ProManager.shared
     private let accessibility = AccessibilityTextController()
     private var overlayController: OverlayWindowController?
     private var onboardingController: OnboardingWindowController?
     private var dashboardController: DashboardWindowController?
-    private var paywallWindow: NSWindow?
     private var statusItem: NSStatusItem?
     private var rightMouseMonitor: Any?
     private var activeApplicationObserver: NSObjectProtocol?
     private var keyEventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var automaticReadTask: Task<Void, Never>?
-    private var storeKitUpdatesTask: Task<Void, Never>?
-    private var proStateCancellable: AnyCancellable?
     private var frontmostMonitor: Timer?
     private var lastFrontmostPID: pid_t = 0
     private var frontmostMonitorTick = 0
     private var lastAXMissLogAt = Date.distantPast
     private var lastAutomaticText = ""
     private var didStartTranslationExperience = false
-    private let initialPaywallShownKey = "didShowInitialPaywall"
 
     override init() {
         let historyStore = TranslationHistoryStore()
-        let freeQuotaStore = FreeQuotaStore()
         self.historyStore = historyStore
-        self.freeQuotaStore = freeQuotaStore
-        self.model = TranslatorModel(historyStore: historyStore, freeQuotaStore: freeQuotaStore, proManager: ProManager.shared)
+        self.model = TranslatorModel(historyStore: historyStore)
         super.init()
     }
 
@@ -90,7 +80,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
 
         DiagnosticLog.write("app launched pid=\(getpid()), trusted=\(accessibility.isTrusted), log=\(DiagnosticLog.url.path)")
-        startStoreKitListener()
         overlayController = OverlayWindowController(
             model: model,
             accessibility: accessibility,
@@ -98,22 +87,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
                 Task { @MainActor in
                     await self?.refreshCurrentText(showFailure: true)
                 }
-            },
-            onUpgrade: { [weak self] in
-                self?.showPaywall()
             }
         )
-        dashboardController = DashboardWindowController(
-            historyStore: historyStore,
-            freeQuotaStore: freeQuotaStore,
-            model: model,
-            proManager: proManager,
-            onUpgrade: { [weak self] in
-                self?.showPaywall()
-            }
-        )
+        dashboardController = DashboardWindowController(historyStore: historyStore, model: model)
         installStatusItem()
-        observeProState()
 
         if UserDefaults.standard.bool(forKey: OnboardingView.didCompleteKey) {
             startTranslationExperience()
@@ -175,10 +152,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         dashboardController?.show()
     }
 
-    @objc private func showPaywallFromStatusItem() {
-        showPaywall()
-    }
-
     @objc private func toggleTranslationFromStatusItem() {
         if model.isEnabled {
             model.disable()
@@ -208,26 +181,18 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
 
         let statusItem = NSMenuItem(
-            title: statusMenuTitle,
+            title: model.isEnabled ? String(localized: "Translation enabled") : String(localized: "Translation disabled"),
             action: nil,
             keyEquivalent: ""
         )
         statusItem.isEnabled = false
         menu.addItem(statusItem)
 
-        if model.isUpgradeRequired {
-            menu.addItem(NSMenuItem(
-                title: String(localized: "Upgrade to Pro"),
-                action: #selector(showPaywallFromStatusItem),
-                keyEquivalent: ""
-            ))
-        } else {
-            menu.addItem(NSMenuItem(
-                title: model.isEnabled ? String(localized: "Disable translation") : String(localized: "Enable translation"),
-                action: #selector(toggleTranslationFromStatusItem),
-                keyEquivalent: ""
-            ))
-        }
+        menu.addItem(NSMenuItem(
+            title: model.isEnabled ? String(localized: "Disable translation") : String(localized: "Enable translation"),
+            action: #selector(toggleTranslationFromStatusItem),
+            keyEquivalent: ""
+        ))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: String(localized: "Open main window"), action: #selector(showDashboardFromStatusItem), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: String(localized: "Show translation overlay"), action: #selector(showOverlayFromStatusItem), keyEquivalent: ""))
@@ -241,14 +206,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         self.statusItem?.menu = menu
     }
 
-    private var statusMenuTitle: String {
-        if model.isUpgradeRequired {
-            return String(localized: "Upgrade required")
-        }
-
-        return model.isEnabled ? String(localized: "Translation enabled") : String(localized: "Translation disabled")
-    }
-
     private func startTranslationExperience() {
         guard !didStartTranslationExperience else {
             return
@@ -260,90 +217,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         model.statusText = String(localized: "Listening for input")
         refreshStatusMenu()
         dashboardController?.show()
-        showInitialPaywallIfNeeded()
 
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(200))
             startTranslationServicesAfterLaunch()
-        }
-    }
-
-    private func showInitialPaywallIfNeeded() {
-        guard !proManager.isPro,
-              !UserDefaults.standard.bool(forKey: initialPaywallShownKey) else {
-            return
-        }
-
-        UserDefaults.standard.set(true, forKey: initialPaywallShownKey)
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(700))
-            showPaywall()
-        }
-    }
-
-    private func showPaywall() {
-        if let paywallWindow {
-            NSApp.activate(ignoringOtherApps: true)
-            paywallWindow.makeKeyAndOrderFront(nil)
-            return
-        }
-
-        let contentView = PaywallView(proManager: proManager) { [weak self] in
-            self?.paywallWindow?.orderOut(nil)
-        }
-        let hostingView = NSHostingView(rootView: contentView)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 680),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = hostingView
-        window.title = "Transtype Pro"
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.backgroundColor = .windowBackgroundColor
-        window.isOpaque = false
-        window.hasShadow = true
-        window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 520, height: 620)
-        window.center()
-        WindowChrome.placeTrafficLightsInsidePanel(window)
-        paywallWindow = window
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-    }
-
-    private func observeProState() {
-        proStateCancellable = proManager.$isPro.sink { [weak self] isPro in
-            guard let self, isPro else {
-                return
-            }
-
-            self.model.clearUpgradeRequiredIfNeeded()
-            self.refreshStatusMenu()
-        }
-    }
-
-    private func startStoreKitListener() {
-        guard storeKitUpdatesTask == nil else {
-            return
-        }
-
-        storeKitUpdatesTask = Task.detached(priority: .background) {
-            for await result in Transaction.updates {
-                guard !Task.isCancelled else {
-                    break
-                }
-
-                switch result {
-                case .verified(let transaction):
-                    await ProManager.shared.finalizeVerifiedTransaction(transaction)
-                    await DiagnosticLog.write("StoreKit transaction finalized product=\(transaction.productID)")
-                case .unverified(let transaction, let error):
-                    await DiagnosticLog.write("StoreKit unverified transaction product=\(transaction.productID), error=\(error.localizedDescription)")
-                }
-            }
         }
     }
 
@@ -380,12 +257,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         frontmostMonitor = nil
         automaticReadTask?.cancel()
         automaticReadTask = nil
-        storeKitUpdatesTask?.cancel()
-        storeKitUpdatesTask = nil
-        proStateCancellable?.cancel()
-        proStateCancellable = nil
-        paywallWindow?.close()
-        paywallWindow = nil
 
         if let keyEventTap {
             CGEvent.tapEnable(tap: keyEventTap, enable: false)
@@ -489,11 +360,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func showOverlayForFocusedText(at appKitPoint: CGPoint? = nil) async {
-        guard ensureTranslationAccess(showPaywall: true) else {
-            overlayController?.show(near: nil)
-            return
-        }
-
         if !accessibility.requestPermission() {
             overlayController?.show(near: nil)
             model.statusText = String(localized: "Allow Accessibility access in System Settings")
@@ -524,11 +390,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func refreshCurrentText(showFailure: Bool = true) async {
-        guard ensureTranslationAccess(showPaywall: true) else {
-            overlayController?.show(near: accessibility.focusedElementFrame())
-            return
-        }
-
         model.enable()
         if showFailure {
             model.statusText = String(localized: "Reading input...")
@@ -588,13 +449,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     @discardableResult
     private func acceptAutomaticText(_ text: String, source: String) -> Bool {
-        guard ensureTranslationAccess(showPaywall: true) else {
-            if overlayController?.isVisible != true {
-                overlayController?.show(near: accessibility.focusedElementFrame())
-            }
-            return false
-        }
-
         guard !text.isEmpty else {
             if !lastAutomaticText.isEmpty {
                 lastAutomaticText = ""
@@ -737,11 +591,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func readUserSelectedText() async {
-        guard ensureTranslationAccess(showPaywall: true) else {
-            overlayController?.show(near: accessibility.focusedElementFrame())
-            return
-        }
-
         accessibility.refreshFrontmostApplicationObserver()
         let axText = accessibility.currentText().trimmingCharacters(in: .whitespacesAndNewlines)
         if !axText.isEmpty {
@@ -769,11 +618,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func canTranslateManualText(_ text: String, source: String) -> Bool {
-        guard ensureTranslationAccess(showPaywall: true) else {
-            DiagnosticLog.write("\(source) blocked by free monthly quota, used=\(freeQuotaStore.usedCount)")
-            return false
-        }
-
         guard !shouldIgnoreCapturedText(text) else {
             DiagnosticLog.write("\(source) ignored UI text, length=\(text.count), app=\(accessibility.focusedApplicationBundleIdentifier() ?? "unknown")")
             return false
@@ -829,11 +673,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func consumeDownArrowIfPossible() -> Bool {
-        if model.isUpgradeRequired {
-            showPaywall()
-            return true
-        }
-
         guard model.isEnabled, model.canApplyTranslation else {
             DiagnosticLog.write("down arrow ignored, enabled=\(model.isEnabled), canApply=\(model.canApplyTranslation), status=\(model.statusText), translatedLength=\(model.translatedText.count)")
             return false
@@ -843,25 +682,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         accessibility.observeCurrentFocusedElement()
         DiagnosticLog.write("down arrow applying translation, element=\(accessibility.focusedElementDebugSummary())")
         overlayController?.applyTranslation()
-        return true
-    }
-
-    private func ensureTranslationAccess(showPaywall shouldShowPaywall: Bool) -> Bool {
-        if proManager.isPro {
-            model.clearUpgradeRequiredIfNeeded()
-            return true
-        }
-
-        freeQuotaStore.refreshMonthIfNeeded()
-        guard !freeQuotaStore.isLimitReached else {
-            model.markUpgradeRequired()
-            refreshStatusMenu()
-            if shouldShowPaywall {
-                showPaywall()
-            }
-            return false
-        }
-
         return true
     }
 }
