@@ -9,6 +9,8 @@ final class TranslatorModel: ObservableObject {
     private static let maximumTranslatableTextLength = 2_000
 
     private let historyStore: TranslationHistoryStore?
+    private let freeQuotaStore: FreeQuotaStore?
+    private let proManager: ProManager?
     private let languageCatalog: TranslationLanguageCatalog
 
     @Published var isEnabled = true
@@ -37,10 +39,14 @@ final class TranslatorModel: ObservableObject {
 
     init(
         historyStore: TranslationHistoryStore? = nil,
+        freeQuotaStore: FreeQuotaStore? = nil,
+        proManager: ProManager? = nil,
         languageCatalog: TranslationLanguageCatalog? = nil
     ) {
         let languageCatalog = languageCatalog ?? .shared
         self.historyStore = historyStore
+        self.freeQuotaStore = freeQuotaStore
+        self.proManager = proManager
         self.languageCatalog = languageCatalog
         languageCatalog.loadIfNeeded()
 
@@ -284,7 +290,12 @@ final class TranslatorModel: ObservableObject {
 
     func recordAppliedTranslation() {
         historyStore?.recordTranslation(sourceText: sourceText, translatedText: translatedText, targetLanguage: selectedLanguage)
+        freeQuotaStore?.recordUsageIfNeeded(isPro: proManager?.isPro == true)
         DiagnosticLog.write("translation history recorded on apply, sourceLength=\(sourceText.count), resultLength=\(translatedText.count)")
+        if proManager?.isPro != true,
+           freeQuotaStore?.isLimitReached == true {
+            markUpgradeRequired()
+        }
     }
 
     func beginTranslationIfCurrent(requestID: Int) {

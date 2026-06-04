@@ -5,20 +5,36 @@ import Translation
 @MainActor
 final class DashboardWindowController {
     private let historyStore: TranslationHistoryStore
+    private let freeQuotaStore: FreeQuotaStore
     private let model: TranslatorModel
     private let proManager: ProManager
+    private let onUpgrade: () -> Void
     private var window: NSWindow?
     private var resizeObserver: NSObjectProtocol?
 
-    init(historyStore: TranslationHistoryStore, model: TranslatorModel, proManager: ProManager) {
+    init(
+        historyStore: TranslationHistoryStore,
+        freeQuotaStore: FreeQuotaStore,
+        model: TranslatorModel,
+        proManager: ProManager,
+        onUpgrade: @escaping () -> Void
+    ) {
         self.historyStore = historyStore
+        self.freeQuotaStore = freeQuotaStore
         self.model = model
         self.proManager = proManager
+        self.onUpgrade = onUpgrade
     }
 
     func show() {
         if window == nil {
-            let contentView = DashboardView(historyStore: historyStore, model: model, proManager: proManager)
+            let contentView = DashboardView(
+                historyStore: historyStore,
+                freeQuotaStore: freeQuotaStore,
+                model: model,
+                proManager: proManager,
+                onUpgrade: onUpgrade
+            )
             let hostingView = NSHostingView(rootView: contentView)
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 980, height: 660),
@@ -86,18 +102,30 @@ private enum DashboardSection: String, CaseIterable, Identifiable {
 
 private struct DashboardView: View {
     @ObservedObject var historyStore: TranslationHistoryStore
+    @ObservedObject var freeQuotaStore: FreeQuotaStore
     @ObservedObject var model: TranslatorModel
     @ObservedObject var proManager: ProManager
+    let onUpgrade: () -> Void
 
     @State private var selection: DashboardSection = .stats
 
     var body: some View {
         NavigationSplitView {
-            List(DashboardSection.allCases, selection: $selection) { section in
-                Label(section.title, systemImage: section.iconName)
-                    .tag(section)
+            VStack(spacing: 14) {
+                List(DashboardSection.allCases, selection: $selection) { section in
+                    Label(section.title, systemImage: section.iconName)
+                        .tag(section)
+                }
+                .listStyle(.sidebar)
+
+                FreeQuotaSidebarCard(
+                    quotaStore: freeQuotaStore,
+                    proManager: proManager,
+                    onUpgrade: onUpgrade
+                )
+                .padding(.horizontal, 12)
+                .padding(.bottom, 14)
             }
-            .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 280)
         } detail: {
             detailView
@@ -117,6 +145,79 @@ private struct DashboardView: View {
         }
     }
 
+}
+
+private struct FreeQuotaSidebarCard: View {
+    @ObservedObject var quotaStore: FreeQuotaStore
+    @ObservedObject var proManager: ProManager
+    let onUpgrade: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(proManager.isPro ? "Pro quota" : "Free quota")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(quotaText)
+                        .font(.headline.weight(.semibold))
+                        .monospacedDigit()
+                }
+
+                Spacer(minLength: 8)
+
+                if !proManager.isPro {
+                    Button("Upgrade") {
+                        onUpgrade()
+                    }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+
+            ProgressView(value: progress)
+                .tint(proManager.isPro ? .green : quotaTint)
+
+            Text(descriptionText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(12)
+        .liquidGlassPanel(cornerRadius: 12)
+        .onAppear {
+            quotaStore.refreshMonthIfNeeded()
+        }
+    }
+
+    private var quotaText: String {
+        if proManager.isPro {
+            return String(localized: "Unlimited")
+        }
+
+        return "\(quotaStore.remainingCount)/\(FreeQuotaStore.monthlyLimit)"
+    }
+
+    private var descriptionText: String {
+        if proManager.isPro {
+            return String(localized: "Unlimited translations are active.")
+        }
+
+        return String(localized: "Free translations reset every month.")
+    }
+
+    private var progress: Double {
+        if proManager.isPro {
+            return 1
+        }
+
+        return Double(quotaStore.remainingCount) / Double(FreeQuotaStore.monthlyLimit)
+    }
+
+    private var quotaTint: Color {
+        quotaStore.remainingCount <= 10 ? .orange : .accentColor
+    }
 }
 
 private struct StatsDashboardView: View {

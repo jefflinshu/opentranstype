@@ -4,8 +4,6 @@ import StoreKit
 
 @MainActor
 final class ProManager: ObservableObject {
-    static let freeTranslationHistoryLimit = 100
-
     enum ProductID: String, CaseIterable {
         case month = "transtypePro.month"
         case year = "transtypePro.year"
@@ -72,10 +70,6 @@ final class ProManager: ObservableObject {
     func finalizeVerifiedTransaction(_ transaction: StoreKit.Transaction) async {
         await refreshProState()
         await transaction.finish()
-    }
-
-    func hasReachedFreeLimit(historyStore: TranslationHistoryStore) -> Bool {
-        !isPro && historyStore.records.count >= Self.freeTranslationHistoryLimit
     }
 
     private func persistCachedProState() {

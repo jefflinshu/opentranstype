@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import StoreKit
 import SwiftUI
 
@@ -50,6 +51,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     ]
 
     private let historyStore: TranslationHistoryStore
+    private let freeQuotaStore: FreeQuotaStore
     private let model: TranslatorModel
     private let proManager = ProManager.shared
     private let accessibility = AccessibilityTextController()
@@ -64,6 +66,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var runLoopSource: CFRunLoopSource?
     private var automaticReadTask: Task<Void, Never>?
     private var storeKitUpdatesTask: Task<Void, Never>?
+    private var proStateCancellable: AnyCancellable?
     private var frontmostMonitor: Timer?
     private var lastFrontmostPID: pid_t = 0
     private var frontmostMonitorTick = 0
@@ -74,8 +77,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     override init() {
         let historyStore = TranslationHistoryStore()
+        let freeQuotaStore = FreeQuotaStore()
         self.historyStore = historyStore
-        self.model = TranslatorModel(historyStore: historyStore)
+        self.freeQuotaStore = freeQuotaStore
+        self.model = TranslatorModel(historyStore: historyStore, freeQuotaStore: freeQuotaStore, proManager: ProManager.shared)
         super.init()
     }
 
@@ -98,8 +103,17 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
                 self?.showPaywall()
             }
         )
-        dashboardController = DashboardWindowController(historyStore: historyStore, model: model, proManager: proManager)
+        dashboardController = DashboardWindowController(
+            historyStore: historyStore,
+            freeQuotaStore: freeQuotaStore,
+            model: model,
+            proManager: proManager,
+            onUpgrade: { [weak self] in
+                self?.showPaywall()
+            }
+        )
         installStatusItem()
+        observeProState()
 
         if UserDefaults.standard.bool(forKey: OnboardingView.didCompleteKey) {
             startTranslationExperience()
@@ -300,6 +314,17 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
+    private func observeProState() {
+        proStateCancellable = proManager.$isPro.sink { [weak self] isPro in
+            guard let self, isPro else {
+                return
+            }
+
+            self.model.clearUpgradeRequiredIfNeeded()
+            self.refreshStatusMenu()
+        }
+    }
+
     private func startStoreKitListener() {
         guard storeKitUpdatesTask == nil else {
             return
@@ -357,6 +382,8 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         automaticReadTask = nil
         storeKitUpdatesTask?.cancel()
         storeKitUpdatesTask = nil
+        proStateCancellable?.cancel()
+        proStateCancellable = nil
         paywallWindow?.close()
         paywallWindow = nil
 
@@ -743,7 +770,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     private func canTranslateManualText(_ text: String, source: String) -> Bool {
         guard ensureTranslationAccess(showPaywall: true) else {
-            DiagnosticLog.write("\(source) blocked by free limit, records=\(historyStore.records.count)")
+            DiagnosticLog.write("\(source) blocked by free monthly quota, used=\(freeQuotaStore.usedCount)")
             return false
         }
 
@@ -825,7 +852,8 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             return true
         }
 
-        guard !proManager.hasReachedFreeLimit(historyStore: historyStore) else {
+        freeQuotaStore.refreshMonthIfNeeded()
+        guard !freeQuotaStore.isLimitReached else {
             model.markUpgradeRequired()
             refreshStatusMenu()
             if shouldShowPaywall {
