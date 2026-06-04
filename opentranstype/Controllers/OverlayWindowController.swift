@@ -7,6 +7,8 @@ final class OverlayWindowController {
         static let defaultSize = NSSize(width: 360, height: 38)
         static let minimumSize = NSSize(width: 360, height: 38)
         static let maximumSize = NSSize(width: 640, height: 120)
+        static let screenMargin: CGFloat = 8
+        static let targetSpacing: CGFloat = 8
     }
 
     private let model: TranslatorModel
@@ -28,8 +30,6 @@ final class OverlayWindowController {
     }
 
     func show(near axFrame: CGRect?) {
-        userMovedWindow = false
-
         if window == nil {
             let contentView = TranslationOverlayView(
                 model: model,
@@ -65,7 +65,13 @@ final class OverlayWindowController {
             window = panel
         }
 
-        positionWindow(near: axFrame)
+        let wasVisible = window?.isVisible == true
+        if userMovedWindow, wasVisible {
+            keepWindowInVisibleBounds()
+        } else {
+            positionWindow(near: axFrame)
+        }
+
         window?.orderFrontRegardless()
     }
 
@@ -86,7 +92,7 @@ final class OverlayWindowController {
             model.recordAppliedTranslation()
             model.updateSourceText(model.translatedText)
         } else {
-            model.statusText = "替换失败"
+            model.statusText = String(localized: "Replace failed")
         }
     }
 
@@ -149,42 +155,45 @@ final class OverlayWindowController {
             return
         }
 
-        let screen = NSScreen.screens.first { screen in
+        let targetScreen = axFrame.flatMap(screenContainingAXFrame(_:))
+        let screen = targetScreen ?? NSScreen.screens.first { screen in
             screen.frame.contains(NSEvent.mouseLocation)
         } ?? NSScreen.main
         let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let windowSize = window.frame.size
 
-        let targetFrame = axFrame.map { convertAXFrameToAppKit($0, visibleFrame: visibleFrame) }
-        let anchorX = targetFrame?.midX ?? NSEvent.mouseLocation.x
-        let anchorY = targetFrame?.maxY ?? NSEvent.mouseLocation.y
-
-        var origin = CGPoint(
-            x: anchorX - windowSize.width / 2,
-            y: anchorY + 8
+        let targetFrame = axFrame.map { convertAXFrameToAppKit($0, on: screen, fallbackVisibleFrame: visibleFrame) }
+        let frame = bestWindowFrame(
+            windowSize: windowSize,
+            near: targetFrame,
+            within: visibleFrame,
+            fallbackPoint: NSEvent.mouseLocation
         )
 
-        if origin.y + windowSize.height > visibleFrame.maxY {
-            origin.y = max(visibleFrame.minY, (targetFrame?.minY ?? NSEvent.mouseLocation.y) - windowSize.height - 8)
-        }
-
-        origin.x = min(max(origin.x, visibleFrame.minX + 8), visibleFrame.maxX - windowSize.width - 8)
-        origin.y = min(max(origin.y, visibleFrame.minY + 8), visibleFrame.maxY - windowSize.height - 8)
-
-        window.setFrameOrigin(origin)
+        window.setFrame(frame, display: true)
     }
 
-    private func constrainedFrame(_ frame: NSRect) -> NSRect {
-        let screen = NSScreen.screens.first { screen in
-            screen.frame.intersects(frame)
-        } ?? NSScreen.main
-        let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    private func keepWindowInVisibleBounds() {
+        guard let window else {
+            return
+        }
+
+        window.setFrame(constrainedFrame(window.frame), display: true)
+    }
+
+    private func constrainedFrame(_ frame: NSRect, visibleFrame: NSRect? = nil) -> NSRect {
+        let visibleFrame = visibleFrame ?? {
+            let screen = NSScreen.screens.first { screen in
+                screen.frame.intersects(frame)
+            } ?? NSScreen.main
+            return screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        }()
 
         var constrained = frame
-        constrained.size.width = clamp(constrained.width, min: Layout.minimumSize.width, max: min(Layout.maximumSize.width, visibleFrame.width - 16))
-        constrained.size.height = clamp(constrained.height, min: Layout.minimumSize.height, max: min(Layout.maximumSize.height, visibleFrame.height - 16))
-        constrained.origin.x = min(max(constrained.origin.x, visibleFrame.minX + 8), visibleFrame.maxX - constrained.width - 8)
-        constrained.origin.y = min(max(constrained.origin.y, visibleFrame.minY + 8), visibleFrame.maxY - constrained.height - 8)
+        constrained.size.width = clamp(constrained.width, min: Layout.minimumSize.width, max: min(Layout.maximumSize.width, visibleFrame.width - Layout.screenMargin * 2))
+        constrained.size.height = clamp(constrained.height, min: Layout.minimumSize.height, max: min(Layout.maximumSize.height, visibleFrame.height - Layout.screenMargin * 2))
+        constrained.origin.x = min(max(constrained.origin.x, visibleFrame.minX + Layout.screenMargin), visibleFrame.maxX - constrained.width - Layout.screenMargin)
+        constrained.origin.y = min(max(constrained.origin.y, visibleFrame.minY + Layout.screenMargin), visibleFrame.maxY - constrained.height - Layout.screenMargin)
         return constrained
     }
 
@@ -192,13 +201,82 @@ final class OverlayWindowController {
         min(max(value, minimumValue), maximumValue)
     }
 
-    private func convertAXFrameToAppKit(_ axFrame: CGRect, visibleFrame: CGRect) -> CGRect {
-        let displayHeight = NSScreen.screens.map(\.frame.maxY).max() ?? visibleFrame.maxY
+    private func bestWindowFrame(windowSize: NSSize, near targetFrame: CGRect?, within visibleFrame: CGRect, fallbackPoint: CGPoint) -> NSRect {
+        guard let targetFrame else {
+            let origin = CGPoint(
+                x: fallbackPoint.x - windowSize.width / 2,
+                y: fallbackPoint.y + Layout.targetSpacing
+            )
+            return constrainedFrame(NSRect(origin: origin, size: windowSize), visibleFrame: visibleFrame)
+        }
+
+        let candidates = [
+            CGPoint(
+                x: targetFrame.midX - windowSize.width / 2,
+                y: targetFrame.maxY + Layout.targetSpacing
+            ),
+            CGPoint(
+                x: targetFrame.midX - windowSize.width / 2,
+                y: targetFrame.minY - windowSize.height - Layout.targetSpacing
+            ),
+            CGPoint(
+                x: targetFrame.maxX + Layout.targetSpacing,
+                y: targetFrame.midY - windowSize.height / 2
+            ),
+            CGPoint(
+                x: targetFrame.minX - windowSize.width - Layout.targetSpacing,
+                y: targetFrame.midY - windowSize.height / 2
+            )
+        ]
+
+        let protectedTargetFrame = targetFrame.insetBy(dx: -Layout.targetSpacing, dy: -Layout.targetSpacing)
+
+        let bestFrame = candidates
+            .map { constrainedFrame(NSRect(origin: $0, size: windowSize), visibleFrame: visibleFrame) }
+            .min { lhs, rhs in
+                score(frame: lhs, avoiding: protectedTargetFrame, in: visibleFrame)
+                    < score(frame: rhs, avoiding: protectedTargetFrame, in: visibleFrame)
+            }
+
+        return bestFrame ?? constrainedFrame(NSRect(origin: fallbackPoint, size: windowSize), visibleFrame: visibleFrame)
+    }
+
+    private func score(frame: CGRect, avoiding targetFrame: CGRect, in visibleFrame: CGRect) -> CGFloat {
+        let overlapArea = frame.intersection(targetFrame).area
+        let distance = CGFloat(hypot(frame.midX - targetFrame.midX, frame.midY - targetFrame.midY))
+        let offscreenPenalty: CGFloat = visibleFrame.contains(frame) ? 0 : 10_000
+        return overlapArea * 100 + distance + offscreenPenalty
+    }
+
+    private func screenContainingAXFrame(_ axFrame: CGRect) -> NSScreen? {
+        let samplePoints = [
+            CGPoint(x: axFrame.midX, y: axFrame.midY),
+            CGPoint(x: axFrame.minX, y: axFrame.minY),
+            CGPoint(x: axFrame.maxX, y: axFrame.maxY)
+        ]
+
+        return NSScreen.screens.first { screen in
+            samplePoints.contains { screen.frame.contains($0) }
+        }
+    }
+
+    private func convertAXFrameToAppKit(_ axFrame: CGRect, on screen: NSScreen?, fallbackVisibleFrame: CGRect) -> CGRect {
+        let displayHeight = screen?.frame.maxY ?? fallbackVisibleFrame.maxY
         return CGRect(
             x: axFrame.origin.x,
             y: displayHeight - axFrame.origin.y - axFrame.height,
             width: axFrame.width,
             height: axFrame.height
         )
+    }
+}
+
+private extension CGRect {
+    var area: CGFloat {
+        guard !isNull, !isEmpty else {
+            return 0
+        }
+
+        return width * height
     }
 }

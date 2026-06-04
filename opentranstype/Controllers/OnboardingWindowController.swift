@@ -32,7 +32,7 @@ final class OnboardingWindowController {
                 defer: false
             )
             window.contentView = hostingView
-            window.title = "OpenTransType"
+            window.title = "Transtype"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.backgroundColor = .windowBackgroundColor
@@ -69,6 +69,9 @@ final class OnboardingWindowController {
 struct OnboardingView: View {
     static let didCompleteKey = "didCompleteOnboarding"
 
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var languageCatalog = TranslationLanguageCatalog.shared
+
     @ObservedObject var model: TranslatorModel
     let onFinish: () -> Void
 
@@ -76,13 +79,14 @@ struct OnboardingView: View {
     @State private var isAccessibilityTrusted = AXIsProcessTrusted()
     @State private var languagePackState: LanguagePackState = .checking
     @State private var languageTask: Task<Void, Never>?
+    @State private var pendingPreparationConfiguration: TranslationSession.Configuration?
 
     var body: some View {
         ZStack {
             OnboardingBackdropView()
                 .blur(radius: 1)
 
-            Color.black.opacity(0.18)
+            Color.black.opacity(backdropOverlayOpacity)
 
             VStack(spacing: 0) {
                 ZStack {
@@ -102,7 +106,7 @@ struct OnboardingView: View {
                     Spacer()
 
                     if page == 0 {
-                        Button("下一步") {
+                        Button("Next") {
                             refreshAccessibilityTrust()
                             page = 1
                         }
@@ -111,7 +115,7 @@ struct OnboardingView: View {
                         .controlSize(.large)
                         .keyboardShortcut(.defaultAction)
                     } else {
-                        Button("开始使用") {
+                        Button("Get Started") {
                             onFinish()
                         }
                         .disabled(!languagePackState.canContinue)
@@ -129,20 +133,46 @@ struct OnboardingView: View {
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
                     .stroke(.secondary.opacity(0.22), lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.18), radius: 28, x: 0, y: 18)
+            .shadow(color: .black.opacity(cardShadowOpacity), radius: 28, x: 0, y: 18)
         }
         .ignoresSafeArea()
         .frame(minWidth: 820, minHeight: 600)
         .onAppear {
+            languageCatalog.loadIfNeeded()
             refreshAccessibilityTrust()
             checkLanguagePack()
         }
         .onChange(of: model.selectedLanguage) { _, _ in
             checkLanguagePack()
         }
+        .onChange(of: languageCatalog.supportedLanguages) { _, _ in
+            checkLanguagePack()
+        }
         .onDisappear {
             languageTask?.cancel()
         }
+        .translationTask(pendingPreparationConfiguration) { session in
+            do {
+                try await session.prepareTranslation()
+                await MainActor.run {
+                    pendingPreparationConfiguration = nil
+                    checkLanguagePack()
+                }
+            } catch {
+                await MainActor.run {
+                    pendingPreparationConfiguration = nil
+                    languagePackState = .failed(languagePackPreparationErrorMessage(error))
+                }
+            }
+        }
+    }
+
+    private var backdropOverlayOpacity: Double {
+        colorScheme == .dark ? 0.32 : 0.18
+    }
+
+    private var cardShadowOpacity: Double {
+        colorScheme == .dark ? 0.34 : 0.18
     }
 
     private var instructionsPage: some View {
@@ -151,27 +181,27 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("欢迎使用")
+                Text("Welcome")
                     .font(.title.weight(.bold))
                     .foregroundStyle(.tint)
 
-                Text("OpenTransType")
+                Text("Transtype")
                     .font(.largeTitle.weight(.bold))
             }
             .padding(.top, 8)
 
             VStack(alignment: .leading, spacing: 22) {
-                OnboardingStepRow(iconName: "cursorarrow.rays", text: "在任意 App 的输入框里输入文字，并自动显示译文。")
-                OnboardingStepRow(iconName: "keyboard.chevron.compact.down", text: "译文准备好后，按 ↓ 或点击浮窗按钮直接替换原文。")
+                OnboardingStepRow(iconName: "cursorarrow.rays", text: String(localized: "Type in any app text field and see the translation instantly."))
+                OnboardingStepRow(iconName: "keyboard.chevron.compact.down", text: String(localized: "Once the translation is ready, press ↓ or click the overlay button to replace the original text."))
                 OnboardingStepRow(iconName: "lock.shield", text: accessibilityStatusText)
             }
 
             HStack(spacing: 12) {
-                Button("打开辅助功能设置") {
+                Button("Open Accessibility Settings") {
                     requestAccessibilityPermission()
                 }
 
-                Button("重新检查") {
+                Button("Check Again") {
                     refreshAccessibilityTrust()
                 }
             }
@@ -188,24 +218,27 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("选择目标语言")
+                Text("Choose a target language")
                     .font(.largeTitle.weight(.bold))
 
-                Text("选择你最常翻译到的语言。首次使用对应语言对时，系统可能会提示下载 Apple 本机翻译语言包。")
+                Text("Choose the language you translate into most often. The first time you use a language pair, Apple may ask you to download the on-device translation pack.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Picker("目标语言", selection: $model.selectedLanguage) {
-                ForEach(TranslationLanguage.supported) { language in
+            Picker("Target language", selection: $model.selectedLanguage) {
+                ForEach(pickerLanguages) { language in
                     Text(language.name).tag(language)
                 }
             }
             .pickerStyle(.menu)
             .frame(maxWidth: 260, alignment: .leading)
 
-            Text("当前默认：\(model.selectedLanguage.name)")
+            Text(String.localizedStringWithFormat(
+                String(localized: "Current default: %@"),
+                model.selectedLanguage.name
+            ))
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -217,7 +250,11 @@ struct OnboardingView: View {
                         .font(.callout.weight(.medium))
                 }
 
-                Text("检查示例语言对：\(sampleSourceLanguageName) → \(model.selectedLanguage.name)。实际使用时会按输入内容自动识别源语言。")
+                Text(String.localizedStringWithFormat(
+                    String(localized: "Checking sample pair: %1$@ → %2$@. When translating, the source language is detected automatically from your input."),
+                    sampleSourceLanguageName,
+                    model.selectedLanguage.name
+                ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -229,7 +266,7 @@ struct OnboardingView: View {
                     .disabled(!languagePackState.canPrepare)
                     .buttonStyle(.bordered)
 
-                    Button("重新检查") {
+                    Button("Check Again") {
                         checkLanguagePack()
                     }
                 }
@@ -245,19 +282,40 @@ struct OnboardingView: View {
     }
 
     private var accessibilityStatusText: String {
-        isAccessibilityTrusted ? "辅助功能权限已允许" : "需要允许辅助功能权限才能读取和替换文本"
+        isAccessibilityTrusted
+            ? String(localized: "Accessibility access granted")
+            : String(localized: "Accessibility access is required to read and replace text")
     }
 
     private var sampleSourceLanguage: Locale.Language {
-        if model.selectedLanguage.id == "en" {
+        if model.selectedLanguage.language.languageCode?.identifier == "en" {
             return Locale.Language(identifier: "zh-Hans")
         }
 
         return Locale.Language(identifier: "en")
     }
 
+    private var pickerLanguages: [TranslationLanguage] {
+        mergedLanguages(ensuring: model.selectedLanguage, in: languageCatalog.supportedLanguages)
+    }
+
+    private func mergedLanguages(
+        ensuring selectedLanguage: TranslationLanguage,
+        in languages: [TranslationLanguage]
+    ) -> [TranslationLanguage] {
+        guard !languages.contains(selectedLanguage) else {
+            return languages
+        }
+
+        return (languages + [selectedLanguage]).sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
     private var sampleSourceLanguageName: String {
-        model.selectedLanguage.id == "en" ? "简体中文" : "English"
+        model.selectedLanguage.language.languageCode?.identifier == "en"
+            ? String(localized: "Simplified Chinese")
+            : String(localized: "English")
     }
 
     private func requestAccessibilityPermission() {
@@ -314,36 +372,27 @@ struct OnboardingView: View {
 
         languageTask?.cancel()
         languagePackState = .preparing
-        let sourceLanguage = sampleSourceLanguage
-        let targetLanguage = model.selectedLanguage.language
+        var configuration = TranslationSession.Configuration(
+            source: sampleSourceLanguage,
+            target: model.selectedLanguage.language
+        )
+        configuration.invalidate()
+        pendingPreparationConfiguration = configuration
+    }
 
-        languageTask = Task { @MainActor in
-            do {
-                let session: TranslationSession
-                if #available(macOS 26.4, *) {
-                    session = TranslationSession(
-                        installedSource: sourceLanguage,
-                        target: targetLanguage,
-                        preferredStrategy: .lowLatency
-                    )
-                } else {
-                    session = TranslationSession(installedSource: sourceLanguage, target: targetLanguage)
-                }
-
-                try await session.prepareTranslation()
-                guard !Task.isCancelled else {
-                    return
-                }
-
-                checkLanguagePack()
-            } catch {
-                guard !Task.isCancelled else {
-                    return
-                }
-
-                languagePackState = .failed(error.localizedDescription)
-            }
+    private func languagePackPreparationErrorMessage(_ error: Error) -> String {
+        if (error as NSError).localizedDescription.contains("cancel") {
+            return String(localized: "Language pack download cancelled")
         }
+
+        let nsError = error as NSError
+        let message = nsError.localizedFailureReason ?? nsError.localizedDescription
+
+        if message == "(null)" || message.isEmpty {
+            return String(localized: "No error details were returned by the system")
+        }
+
+        return message
     }
 
     private var pageIndicator: some View {
@@ -387,11 +436,11 @@ private enum LanguagePackState: Equatable {
     var actionTitle: String {
         switch self {
         case .preparing:
-            return "准备中..."
+            return String(localized: "Preparing...")
         case .installed:
-            return "已准备好"
+            return String(localized: "Ready")
         default:
-            return "下载语言包"
+            return String(localized: "Download language pack")
         }
     }
 
@@ -424,17 +473,20 @@ private enum LanguagePackState: Equatable {
     var message: String {
         switch self {
         case .checking:
-            return "正在检查语言包..."
+            return String(localized: "Checking language pack...")
         case .installed:
-            return "语言包已安装，可以开始使用"
+            return String(localized: "Language pack installed. You're ready to go.")
         case .needsDownload:
-            return "这个语言包还没安装，请先下载"
+            return String(localized: "This language pack is not installed yet. Download it first.")
         case .preparing:
-            return "正在请求系统准备语言包"
+            return String(localized: "Asking the system to prepare the language pack")
         case .unsupported:
-            return "系统暂不支持这个示例语言对"
+            return String(localized: "This sample language pair is not supported by the system")
         case .failed(let reason):
-            return "语言包准备失败：\(reason)"
+            return String.localizedStringWithFormat(
+                String(localized: "Failed to prepare language pack: %@"),
+                reason
+            )
         }
     }
 }
@@ -443,12 +495,12 @@ private struct OnboardingBackdropView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: .constant("stats")) {
-                Section("OpenTransType") {
-                    Label("数据统计", systemImage: "chart.bar.xaxis")
+                Section("Transtype") {
+                    Label("Stats", systemImage: "chart.bar.xaxis")
                         .tag("stats")
-                    Label("历史记录", systemImage: "clock.arrow.circlepath")
+                    Label("History", systemImage: "clock.arrow.circlepath")
                         .tag("history")
-                    Label("设置", systemImage: "gearshape")
+                    Label("Settings", systemImage: "gearshape")
                         .tag("settings")
                 }
             }
@@ -457,7 +509,7 @@ private struct OnboardingBackdropView: View {
         } detail: {
             VStack(alignment: .leading, spacing: 28) {
                 HStack {
-                    Text("数据统计")
+                    Text("Stats")
                         .font(.system(size: 34, weight: .bold))
 
                     Spacer()
@@ -469,7 +521,7 @@ private struct OnboardingBackdropView: View {
 
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
-                        Text("搜索")
+                        Text("Search")
                     }
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 18)
@@ -481,7 +533,12 @@ private struct OnboardingBackdropView: View {
                     GridItem(.flexible(), spacing: 18),
                     GridItem(.flexible(), spacing: 18)
                 ], spacing: 18) {
-                    ForEach(["翻译次数", "原文字数", "译文字数", "平均长度"], id: \.self) { title in
+                    ForEach([
+                        String(localized: "Translations"),
+                        String(localized: "Source characters"),
+                        String(localized: "Translated characters"),
+                        String(localized: "Average length")
+                    ], id: \.self) { title in
                         VStack(alignment: .leading, spacing: 12) {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(.secondary.opacity(0.10))

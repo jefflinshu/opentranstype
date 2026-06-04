@@ -4,6 +4,10 @@ import ApplicationServices
 @MainActor
 final class AccessibilityTextController {
     private static let maximumAutomaticTextLength = 2_000
+    private static let axMessagingTimeout: Float = 0.15
+    private static let maximumDescendantDepth = 6
+    private static let maximumDescendantChecks = 80
+    private static let maximumChildrenPerElement = 40
 
     private var focusedElement: AXUIElement?
     private var observer: AXObserver?
@@ -98,9 +102,8 @@ final class AccessibilityTextController {
     }
 
     private func focusedTextElement(from container: AXUIElement) -> AXUIElement? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(container, kAXFocusedUIElementAttribute as CFString, &value) == .success,
-              let value else {
+        guard let value = copyAttributeValue(kAXFocusedUIElementAttribute as String, from: container),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else {
             return nil
         }
 
@@ -180,9 +183,8 @@ final class AccessibilityTextController {
         lastDiagnosticsAt = Date()
 
         let systemElement = AXUIElementCreateSystemWide()
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(systemElement, kAXFocusedUIElementAttribute as CFString, &value) == .success,
-              let value else {
+        guard let value = copyAttributeValue(kAXFocusedUIElementAttribute as String, from: systemElement),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else {
             DiagnosticLog.write("AX diagnostics \(reason): no system focused element")
             return
         }
@@ -213,12 +215,10 @@ final class AccessibilityTextController {
             return nil
         }
 
-        var positionValue: CFTypeRef?
-        var sizeValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(focusedElement, kAXPositionAttribute as CFString, &positionValue) == .success,
-              AXUIElementCopyAttributeValue(focusedElement, kAXSizeAttribute as CFString, &sizeValue) == .success,
-              let positionValue,
-              let sizeValue else {
+        guard let positionValue = copyAttributeValue(kAXPositionAttribute as String, from: focusedElement),
+              let sizeValue = copyAttributeValue(kAXSizeAttribute as String, from: focusedElement),
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
             return nil
         }
 
@@ -333,27 +333,25 @@ final class AccessibilityTextController {
             return true
         }
 
-        if isSettable(kAXValueAttribute, on: element),
-           role.map(textRoles.contains) != false {
+        let isTextRole = role.map(textRoles.contains) == true
+        guard isTextRole else {
+            return false
+        }
+
+        if isSettable(kAXValueAttribute, on: element) {
             return true
         }
 
-        if isSettable(kAXSelectedTextRangeAttribute, on: element),
-           role.map(textRoles.contains) != false {
+        if isSettable(kAXSelectedTextRangeAttribute, on: element) {
             return true
         }
 
         if supportsParameterizedAttribute(kAXStringForRangeParameterizedAttribute as String, on: element),
-           numberAttribute(kAXNumberOfCharactersAttribute as String, from: element) != nil,
-           role.map(textRoles.contains) == true {
+           numberAttribute(kAXNumberOfCharactersAttribute as String, from: element) != nil {
             return true
         }
 
-        guard let role else {
-            return false
-        }
-
-        return textRoles.contains(role)
+        return true
     }
 
     private func installObserver(for app: NSRunningApplication) {
@@ -532,7 +530,8 @@ final class AccessibilityTextController {
             return element
         }
 
-        if let descendant = textTargetDescendant(of: element, depth: 0) {
+        var remainingDescendantChecks = Self.maximumDescendantChecks
+        if let descendant = textTargetDescendant(of: element, depth: 0, remainingChecks: &remainingDescendantChecks) {
             return descendant
         }
 
@@ -546,7 +545,7 @@ final class AccessibilityTextController {
                 return parent
             }
 
-            if let siblingDescendant = textTargetDescendant(of: parent, depth: 0) {
+            if let siblingDescendant = textTargetDescendant(of: parent, depth: 0, remainingChecks: &remainingDescendantChecks) {
                 return siblingDescendant
             }
 
@@ -556,23 +555,35 @@ final class AccessibilityTextController {
         return nil
     }
 
-    private func textTargetDescendant(of element: AXUIElement, depth: Int) -> AXUIElement? {
-        guard depth < 8 else {
+    private func textTargetDescendant(
+        of element: AXUIElement,
+        depth: Int,
+        remainingChecks: inout Int
+    ) -> AXUIElement? {
+        guard depth < Self.maximumDescendantDepth, remainingChecks > 0 else {
             return nil
         }
 
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success,
+        guard let value = copyAttributeValue(kAXChildrenAttribute as String, from: element),
               let children = value as? [AXUIElement] else {
             return nil
         }
 
-        for child in children.prefix(160) {
+        for child in children.prefix(Self.maximumChildrenPerElement) {
+            guard remainingChecks > 0 else {
+                return nil
+            }
+            remainingChecks -= 1
+
             if isTextTargetElement(child) {
                 return child
             }
 
-            if let descendant = textTargetDescendant(of: child, depth: depth + 1) {
+            if let descendant = textTargetDescendant(
+                of: child,
+                depth: depth + 1,
+                remainingChecks: &remainingChecks
+            ) {
                 return descendant
             }
         }
@@ -585,8 +596,7 @@ final class AccessibilityTextController {
             return
         }
 
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success,
+        guard let value = copyAttributeValue(kAXChildrenAttribute as String, from: element),
               let children = value as? [AXUIElement],
               !children.isEmpty else {
             return
@@ -618,9 +628,8 @@ final class AccessibilityTextController {
             return nil
         }
 
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &value) == .success,
-              let value else {
+        guard let value = copyAttributeValue(kAXParentAttribute as String, from: element),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else {
             return nil
         }
 
@@ -628,8 +637,7 @@ final class AccessibilityTextController {
     }
 
     private func stringAttribute(_ attribute: String, from element: AXUIElement) -> String? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+        guard let value = copyAttributeValue(attribute, from: element) else {
             return nil
         }
 
@@ -642,6 +650,17 @@ final class AccessibilityTextController {
         }
 
         return nil
+    }
+
+    private func copyAttributeValue(_ attribute: String, from element: AXUIElement) -> CFTypeRef? {
+        AXUIElementSetMessagingTimeout(element, Self.axMessagingTimeout)
+
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+
+        return value
     }
 
     private func readableText(from element: AXUIElement) -> String? {
@@ -675,6 +694,8 @@ final class AccessibilityTextController {
             return nil
         }
 
+        AXUIElementSetMessagingTimeout(element, Self.axMessagingTimeout)
+
         var value: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(
             element,
@@ -689,8 +710,7 @@ final class AccessibilityTextController {
     }
 
     private func boolAttribute(_ attribute: String, from element: AXUIElement) -> Bool? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+        guard let value = copyAttributeValue(attribute, from: element) else {
             return nil
         }
 
@@ -698,8 +718,7 @@ final class AccessibilityTextController {
     }
 
     private func numberAttribute(_ attribute: String, from element: AXUIElement) -> Int? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+        guard let value = copyAttributeValue(attribute, from: element) else {
             return nil
         }
 
@@ -707,6 +726,8 @@ final class AccessibilityTextController {
     }
 
     private func supportsParameterizedAttribute(_ attribute: String, on element: AXUIElement) -> Bool {
+        AXUIElementSetMessagingTimeout(element, Self.axMessagingTimeout)
+
         var value: CFArray?
         guard AXUIElementCopyParameterizedAttributeNames(element, &value) == .success,
               let attributes = value as? [String] else {
@@ -717,6 +738,8 @@ final class AccessibilityTextController {
     }
 
     private func isSettable(_ attribute: String, on element: AXUIElement) -> Bool {
+        AXUIElementSetMessagingTimeout(element, Self.axMessagingTimeout)
+
         var settable = DarwinBoolean(false)
         guard AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success else {
             return false

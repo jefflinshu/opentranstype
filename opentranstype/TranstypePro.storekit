@@ -1,0 +1,156 @@
+{
+  "appPolicies" : {
+    "eula" : "Welcome to Transtype.\n\nTranstype is a floating translation helper for macOS text fields. It requires macOS Accessibility permission to read selected or accessible text and write translated text back after confirmation. Translation primarily uses Apple's on-device Translation framework and installed language packs. Review translated text before sending or publishing. For questions, contact service@curisaas.com.",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : "https://curisaas.com/transtype"
+      }
+    ]
+  },
+  "identifier" : "TRANSTYPEPRO",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "19.9",
+      "familyShareable" : true,
+      "internalID" : "TRANSLIFE",
+      "localizations" : [
+        {
+          "description" : "Lifetime access to Transtype Pro.",
+          "displayName" : "Transtype Pro Lifetime",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "transtypePro.lifetime",
+      "referenceName" : "TranstypeProLifetime",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "TRANSTYPE",
+      "localizations" : [
+
+      ],
+      "name" : "TranstypePro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "1.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "TRANSMONTH",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Monthly access to Transtype Pro.",
+              "displayName" : "Transtype Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "transtypePro.month",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "TranstypeProMonthly",
+          "subscriptionGroupID" : "TRANSTYPE",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "TRANSYEAR",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Yearly access to Transtype Pro.",
+              "displayName" : "Transtype Pro Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "transtypePro.year",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "TranstypeProYearly",
+          "subscriptionGroupID" : "TRANSTYPE",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

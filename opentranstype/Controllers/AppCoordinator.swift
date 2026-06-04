@@ -1,10 +1,11 @@
 import AppKit
+import StoreKit
 import SwiftUI
 
 enum DiagnosticLog {
     static let url = FileManager.default
         .homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs/OpenTransType/diagnostics.log")
+        .appendingPathComponent("Library/Logs/Transtype/diagnostics.log")
 
     private static let queue = DispatchQueue(label: "com.curisaas.opentranstype.diagnostic-log")
 
@@ -33,7 +34,7 @@ enum DiagnosticLog {
                 }
                 try handle.close()
             } catch {
-                NSLog("OpenTransType diagnostics log failed: \(error.localizedDescription)")
+                NSLog("Transtype diagnostics log failed: \(error.localizedDescription)")
             }
         }
     }
@@ -50,6 +51,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     private let historyStore: TranslationHistoryStore
     private let model: TranslatorModel
+    private let proManager = ProManager.shared
     private let accessibility = AccessibilityTextController()
     private var overlayController: OverlayWindowController?
     private var onboardingController: OnboardingWindowController?
@@ -60,6 +62,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var keyEventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var automaticReadTask: Task<Void, Never>?
+    private var storeKitUpdatesTask: Task<Void, Never>?
     private var frontmostMonitor: Timer?
     private var lastFrontmostPID: pid_t = 0
     private var frontmostMonitorTick = 0
@@ -80,6 +83,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
 
         DiagnosticLog.write("app launched pid=\(getpid()), trusted=\(accessibility.isTrusted), log=\(DiagnosticLog.url.path)")
+        startStoreKitListener()
         overlayController = OverlayWindowController(
             model: model,
             accessibility: accessibility,
@@ -89,7 +93,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
                 }
             }
         )
-        dashboardController = DashboardWindowController(historyStore: historyStore, model: model)
+        dashboardController = DashboardWindowController(historyStore: historyStore, model: model, proManager: proManager)
         installStatusItem()
 
         if UserDefaults.standard.bool(forKey: OnboardingView.didCompleteKey) {
@@ -139,9 +143,9 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "OpenTransType")
+            button.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "Transtype")
             button.image?.isTemplate = true
-            button.toolTip = "OpenTransType"
+            button.toolTip = "Transtype"
         }
 
         statusItem = item
@@ -166,7 +170,9 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     @objc private func showOverlayFromStatusItem() {
         model.enable()
-        model.statusText = model.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "正在监听输入" : model.statusText
+        model.statusText = model.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? String(localized: "Listening for input")
+            : model.statusText
         overlayController?.show(near: nil)
         refreshStatusMenu()
     }
@@ -178,20 +184,24 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private func refreshStatusMenu() {
         let menu = NSMenu()
 
-        let statusItem = NSMenuItem(title: model.isEnabled ? "翻译已启用" : "翻译已禁用", action: nil, keyEquivalent: "")
+        let statusItem = NSMenuItem(
+            title: model.isEnabled ? String(localized: "Translation enabled") : String(localized: "Translation disabled"),
+            action: nil,
+            keyEquivalent: ""
+        )
         statusItem.isEnabled = false
         menu.addItem(statusItem)
 
         menu.addItem(NSMenuItem(
-            title: model.isEnabled ? "禁用翻译" : "启用翻译",
+            title: model.isEnabled ? String(localized: "Disable translation") : String(localized: "Enable translation"),
             action: #selector(toggleTranslationFromStatusItem),
             keyEquivalent: ""
         ))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "打开主窗口", action: #selector(showDashboardFromStatusItem), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "显示翻译浮窗", action: #selector(showOverlayFromStatusItem), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: String(localized: "Open main window"), action: #selector(showDashboardFromStatusItem), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: String(localized: "Show translation overlay"), action: #selector(showOverlayFromStatusItem), keyEquivalent: ""))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "退出", action: #selector(quitFromStatusItem), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: String(localized: "Quit"), action: #selector(quitFromStatusItem), keyEquivalent: "q"))
 
         for item in menu.items {
             item.target = self
@@ -208,7 +218,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         didStartTranslationExperience = true
         NSApp.setActivationPolicy(.regular)
         model.enable()
-        model.statusText = "正在监听输入"
+        model.statusText = String(localized: "Listening for input")
         refreshStatusMenu()
         dashboardController?.show()
 
@@ -218,9 +228,31 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func startStoreKitListener() {
+        guard storeKitUpdatesTask == nil else {
+            return
+        }
+
+        storeKitUpdatesTask = Task.detached(priority: .background) {
+            for await result in Transaction.updates {
+                guard !Task.isCancelled else {
+                    break
+                }
+
+                switch result {
+                case .verified(let transaction):
+                    await ProManager.shared.finalizeVerifiedTransaction(transaction)
+                    await DiagnosticLog.write("StoreKit transaction finalized product=\(transaction.productID)")
+                case .unverified(let transaction, let error):
+                    await DiagnosticLog.write("StoreKit unverified transaction product=\(transaction.productID), error=\(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     private func startTranslationServicesAfterLaunch() {
         guard accessibility.isTrusted else {
-            model.statusText = "请在系统设置中允许辅助功能权限"
+            model.statusText = String(localized: "Allow Accessibility access in System Settings")
             refreshStatusMenu()
             DiagnosticLog.write("translation services deferred, accessibility not trusted")
             return
@@ -251,6 +283,8 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         frontmostMonitor = nil
         automaticReadTask?.cancel()
         automaticReadTask = nil
+        storeKitUpdatesTask?.cancel()
+        storeKitUpdatesTask = nil
 
         if let keyEventTap {
             CGEvent.tapEnable(tap: keyEventTap, enable: false)
@@ -356,7 +390,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private func showOverlayForFocusedText(at appKitPoint: CGPoint? = nil) async {
         if !accessibility.requestPermission() {
             overlayController?.show(near: nil)
-            model.statusText = "请在系统设置中允许辅助功能权限"
+            model.statusText = String(localized: "Allow Accessibility access in System Settings")
             DiagnosticLog.write("accessibility permission missing")
             return
         }
@@ -386,7 +420,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private func refreshCurrentText(showFailure: Bool = true) async {
         model.enable()
         if showFailure {
-            model.statusText = "读取输入中..."
+            model.statusText = String(localized: "Reading input...")
         }
 
         let axText = accessibility.currentText().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -409,7 +443,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             DiagnosticLog.write("manual copy fallback text length=\(copiedText.count)")
             model.forceTranslation(for: copiedText)
         } else if showFailure {
-            model.statusText = "未读到文本"
+            model.statusText = String(localized: "No text found")
             DiagnosticLog.write("manual read failed, element=\(accessibility.focusedElementDebugSummary())")
             accessibility.logFocusedElementDiagnostics(reason: "manual read failed")
         }
@@ -620,7 +654,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         guard text.count <= Self.maximumManualTextLength else {
             model.enable()
             model.translatedText = ""
-            model.statusText = "文本过长"
+            model.statusText = String(localized: "Text too long")
             overlayController?.show(near: accessibility.focusedElementFrame())
             DiagnosticLog.write("\(source) ignored too long, length=\(text.count)")
             return false

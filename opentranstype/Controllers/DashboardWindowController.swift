@@ -6,17 +6,19 @@ import Translation
 final class DashboardWindowController {
     private let historyStore: TranslationHistoryStore
     private let model: TranslatorModel
+    private let proManager: ProManager
     private var window: NSWindow?
     private var resizeObserver: NSObjectProtocol?
 
-    init(historyStore: TranslationHistoryStore, model: TranslatorModel) {
+    init(historyStore: TranslationHistoryStore, model: TranslatorModel, proManager: ProManager) {
         self.historyStore = historyStore
         self.model = model
+        self.proManager = proManager
     }
 
     func show() {
         if window == nil {
-            let contentView = DashboardView(historyStore: historyStore, model: model)
+            let contentView = DashboardView(historyStore: historyStore, model: model, proManager: proManager)
             let hostingView = NSHostingView(rootView: contentView)
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 980, height: 660),
@@ -25,7 +27,7 @@ final class DashboardWindowController {
                 defer: false
             )
             window.contentView = hostingView
-            window.title = "OpenTransType"
+            window.title = "Transtype"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.backgroundColor = .windowBackgroundColor
@@ -62,11 +64,11 @@ private enum DashboardSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .stats:
-            return "数据统计"
+            return String(localized: "Stats")
         case .history:
-            return "历史记录"
+            return String(localized: "History")
         case .settings:
-            return "设置"
+            return String(localized: "Settings")
         }
     }
 
@@ -85,6 +87,7 @@ private enum DashboardSection: String, CaseIterable, Identifiable {
 private struct DashboardView: View {
     @ObservedObject var historyStore: TranslationHistoryStore
     @ObservedObject var model: TranslatorModel
+    @ObservedObject var proManager: ProManager
 
     @State private var selection: DashboardSection = .stats
 
@@ -110,7 +113,7 @@ private struct DashboardView: View {
         case .history:
             HistoryDashboardView(historyStore: historyStore)
         case .settings:
-            SettingsDashboardView(model: model)
+            SettingsDashboardView(model: model, proManager: proManager)
         }
     }
 
@@ -127,32 +130,32 @@ private struct StatsDashboardView: View {
                     GridItem(.flexible(), spacing: 14),
                     GridItem(.flexible(), spacing: 14)
                 ], spacing: 14) {
-                    StatCard(title: "翻译次数", value: "\(historyStore.stats.recordCount)", iconName: "number")
-                    StatCard(title: "原文字数", value: "\(historyStore.stats.sourceCharacterCount)", iconName: "character.cursor.ibeam")
-                    StatCard(title: "译文字数", value: "\(historyStore.stats.translatedCharacterCount)", iconName: "textformat")
-                    StatCard(title: "平均长度", value: "\(historyStore.stats.averageSourceLength)", iconName: "divide")
+                    StatCard(title: String(localized: "Translations"), value: "\(historyStore.stats.recordCount)", iconName: "number")
+                    StatCard(title: String(localized: "Source characters"), value: "\(historyStore.stats.sourceCharacterCount)", iconName: "character.cursor.ibeam")
+                    StatCard(title: String(localized: "Translated characters"), value: "\(historyStore.stats.translatedCharacterCount)", iconName: "textformat")
+                    StatCard(title: String(localized: "Average length"), value: "\(historyStore.stats.averageSourceLength)", iconName: "divide")
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("当前设置")
+                    Text("Current settings")
                         .font(.title3.weight(.semibold))
 
                     HStack {
-                        Label("默认目标语言", systemImage: "globe")
+                        Label("Default target language", systemImage: "globe")
                         Spacer()
                         Text(model.selectedLanguage.name)
                             .foregroundStyle(.secondary)
                     }
 
                     HStack {
-                        Label("监听状态", systemImage: model.isEnabled ? "ear" : "pause.circle")
+                        Label("Listening status", systemImage: model.isEnabled ? "ear" : "pause.circle")
                         Spacer()
                         Text(model.statusText)
                             .foregroundStyle(.secondary)
                     }
 
                     HStack {
-                        Label("最近目标语言", systemImage: "clock")
+                        Label("Recent target language", systemImage: "clock")
                         Spacer()
                         Text(historyStore.stats.latestTargetLanguage)
                             .foregroundStyle(.secondary)
@@ -164,6 +167,7 @@ private struct StatsDashboardView: View {
             .padding(28)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .navigationTitle(DashboardSection.stats.title)
     }
 }
 
@@ -171,21 +175,12 @@ private struct HistoryDashboardView: View {
     @ObservedObject var historyStore: TranslationHistoryStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Spacer()
-
-                Button("清空") {
-                    historyStore.clear()
-                }
-                .disabled(historyStore.records.isEmpty)
-            }
-
+        Group {
             if historyStore.records.isEmpty {
                 ContentUnavailableView(
-                    "还没有历史记录",
+                    "No history yet",
                     systemImage: "clock.arrow.circlepath",
-                    description: Text("完成一次翻译后会显示在这里。")
+                    description: Text("Completed translations will appear here.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -197,31 +192,79 @@ private struct HistoryDashboardView: View {
             }
         }
         .padding(28)
+        .navigationTitle(DashboardSection.history.title)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Clear") {
+                    historyStore.clear()
+                }
+                .disabled(historyStore.records.isEmpty)
+            }
+        }
     }
 }
 
 private struct SettingsDashboardView: View {
+    private let supportURL = URL(string: "https://curisaas.com/transtype")!
+    private let privacyPolicyURL = URL(string: "https://curisaas.com/transtype/privacy")!
+    private let termsURL = URL(string: "https://curisaas.com/transtype/terms")!
+
+    @ObservedObject private var languageCatalog = TranslationLanguageCatalog.shared
     @ObservedObject var model: TranslatorModel
+    @ObservedObject var proManager: ProManager
 
     @State private var languagePackStates: [String: DashboardLanguagePackState] = [:]
     @State private var languageTasks: [String: Task<Void, Never>] = [:]
+    @State private var pendingPreparationConfiguration: TranslationSession.Configuration?
+    @State private var preparingLanguageID: String?
+    @State private var isShowingPaywall = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("默认目标语言")
+                    HStack(alignment: .center, spacing: 14) {
+                        Image(systemName: proManager.isPro ? "checkmark.seal.fill" : "sparkles")
+                            .font(.title2)
+                            .foregroundStyle(proManager.isPro ? Color.green : Color.accentColor)
+                            .frame(width: 34)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(proManager.isPro ? "Transtype Pro active" : "Upgrade to Transtype Pro")
+                                .font(.title3.weight(.semibold))
+
+                            Text(proManager.isPro ? activePlanDescription : "Unlock unlimited translation workflow and Pro writing utilities.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button(proManager.isPro ? "Manage" : "Upgrade") {
+                            isShowingPaywall = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(18)
+                .liquidGlassPanel(cornerRadius: 10)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Default target language")
                         .font(.title3.weight(.semibold))
 
-                    Picker("默认目标语言", selection: $model.selectedLanguage) {
-                        ForEach(TranslationLanguage.supported) { language in
+                    Picker("Default target language", selection: $model.selectedLanguage) {
+                        ForEach(pickerLanguages) { language in
                             Text(language.name).tag(language)
                         }
                     }
                     .pickerStyle(.menu)
                     .frame(maxWidth: 280, alignment: .leading)
 
-                    Text("当前默认：\(model.selectedLanguage.name)")
+                    Text(String.localizedStringWithFormat(
+                        String(localized: "Current default: %@"),
+                        model.selectedLanguage.name
+                    ))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -229,39 +272,53 @@ private struct SettingsDashboardView: View {
                 .liquidGlassPanel(cornerRadius: 10)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("语言包")
-                            .font(.title3.weight(.semibold))
+                    Text("Language packs")
+                        .font(.title3.weight(.semibold))
 
-                        Spacer()
-
-                        Button("全部检查") {
-                            checkAllLanguagePacks()
-                        }
-                    }
-
-                    Text("按示例语言对检查本机翻译语言包。实际翻译时会根据输入内容自动识别源语言。")
+                    Text("Automatically checks on-device translation language packs. The source language is detected from your input when translating.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
 
                     VStack(spacing: 0) {
-                        ForEach(TranslationLanguage.supported) { language in
+                        ForEach(languageCatalog.supportedLanguages) { language in
                             LanguagePackRow(
                                 language: language,
                                 state: languagePackStates[language.id] ?? .idle,
                                 sourceLanguageName: sampleSourceLanguageName(for: language),
-                                onCheck: {
-                                    checkLanguagePack(for: language)
-                                },
                                 onPrepare: {
                                     prepareLanguagePack(for: language)
                                 }
                             )
 
-                            if language.id != TranslationLanguage.supported.last?.id {
+                            if language.id != languageCatalog.supportedLanguages.last?.id {
                                 Divider()
                                     .padding(.leading, 36)
                             }
+                        }
+                    }
+                }
+                .padding(18)
+                .liquidGlassPanel(cornerRadius: 10)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Support and legal")
+                        .font(.title3.weight(.semibold))
+
+                    Text("Use these links for support, privacy, and terms while preparing the App Store listing.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Link(destination: supportURL) {
+                            Label("Support", systemImage: "questionmark.circle")
+                        }
+
+                        Link(destination: privacyPolicyURL) {
+                            Label("Privacy Policy", systemImage: "hand.raised")
+                        }
+
+                        Link(destination: termsURL) {
+                            Label("Terms of Use", systemImage: "doc.text")
                         }
                     }
                 }
@@ -272,20 +329,68 @@ private struct SettingsDashboardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
+            languageCatalog.loadIfNeeded()
             checkAllLanguagePacks()
+            Task {
+                await proManager.refreshProState()
+            }
+        }
+        .sheet(isPresented: $isShowingPaywall) {
+            PaywallView(proManager: proManager)
         }
         .onChange(of: model.selectedLanguage) { _, _ in
             if languagePackStates[model.selectedLanguage.id] == nil {
                 checkLanguagePack(for: model.selectedLanguage)
             }
         }
+        .onChange(of: languageCatalog.supportedLanguages) { _, _ in
+            checkAllLanguagePacks()
+        }
         .onDisappear {
             cancelLanguageTasks()
+        }
+        .translationTask(pendingPreparationConfiguration) { session in
+            guard let preparingLanguageID,
+                  let language = languageCatalog.language(withID: preparingLanguageID) else {
+                await MainActor.run {
+                    pendingPreparationConfiguration = nil
+                }
+                return
+            }
+
+            do {
+                try await session.prepareTranslation()
+                await MainActor.run {
+                    self.preparingLanguageID = nil
+                    pendingPreparationConfiguration = nil
+                    checkLanguagePack(for: language)
+                }
+            } catch {
+                await MainActor.run {
+                    languagePackStates[preparingLanguageID] = .failed(languagePackPreparationErrorMessage(error))
+                    self.preparingLanguageID = nil
+                    pendingPreparationConfiguration = nil
+                }
+            }
+        }
+        .navigationTitle(DashboardSection.settings.title)
+    }
+
+    private var activePlanDescription: String {
+        switch proManager.activeProductID {
+        case .month:
+            return String(localized: "Monthly plan is active.")
+        case .year:
+            return String(localized: "Yearly plan is active.")
+        case .lifetime:
+            return String(localized: "Lifetime access is active.")
+        case .none:
+            return String(localized: "Pro access is active.")
         }
     }
 
     private func checkAllLanguagePacks() {
-        for language in TranslationLanguage.supported {
+        for language in languageCatalog.supportedLanguages {
             checkLanguagePack(for: language)
         }
     }
@@ -332,39 +437,13 @@ private struct SettingsDashboardView: View {
 
         languageTasks[language.id]?.cancel()
         languagePackStates[language.id] = .preparing
-
-        let sourceLanguage = sampleSourceLanguage(for: language)
-        let targetLanguage = language.language
-
-        languageTasks[language.id] = Task { @MainActor in
-            do {
-                let session: TranslationSession
-                if #available(macOS 26.4, *) {
-                    session = TranslationSession(
-                        installedSource: sourceLanguage,
-                        target: targetLanguage,
-                        preferredStrategy: .lowLatency
-                    )
-                } else {
-                    session = TranslationSession(installedSource: sourceLanguage, target: targetLanguage)
-                }
-
-                try await session.prepareTranslation()
-                guard !Task.isCancelled else {
-                    return
-                }
-
-                languageTasks[language.id] = nil
-                checkLanguagePack(for: language)
-            } catch {
-                guard !Task.isCancelled else {
-                    return
-                }
-
-                languagePackStates[language.id] = .failed(error.localizedDescription)
-                languageTasks[language.id] = nil
-            }
-        }
+        preparingLanguageID = language.id
+        var configuration = TranslationSession.Configuration(
+            source: sampleSourceLanguage(for: language),
+            target: language.language
+        )
+        configuration.invalidate()
+        pendingPreparationConfiguration = configuration
     }
 
     private func cancelLanguageTasks() {
@@ -376,7 +455,7 @@ private struct SettingsDashboardView: View {
     }
 
     private func sampleSourceLanguage(for language: TranslationLanguage) -> Locale.Language {
-        if language.id == "en" {
+        if language.language.languageCode?.identifier == "en" {
             return Locale.Language(identifier: "zh-Hans")
         }
 
@@ -384,7 +463,41 @@ private struct SettingsDashboardView: View {
     }
 
     private func sampleSourceLanguageName(for language: TranslationLanguage) -> String {
-        language.id == "en" ? "简体中文" : "English"
+        language.language.languageCode?.identifier == "en"
+            ? String(localized: "Simplified Chinese")
+            : String(localized: "English")
+    }
+
+    private var pickerLanguages: [TranslationLanguage] {
+        mergedLanguages(ensuring: model.selectedLanguage, in: languageCatalog.supportedLanguages)
+    }
+
+    private func mergedLanguages(
+        ensuring selectedLanguage: TranslationLanguage,
+        in languages: [TranslationLanguage]
+    ) -> [TranslationLanguage] {
+        guard !languages.contains(selectedLanguage) else {
+            return languages
+        }
+
+        return (languages + [selectedLanguage]).sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func languagePackPreparationErrorMessage(_ error: Error) -> String {
+        if (error as NSError).localizedDescription.contains("cancel") {
+            return String(localized: "Language pack download cancelled")
+        }
+
+        let nsError = error as NSError
+        let message = nsError.localizedFailureReason ?? nsError.localizedDescription
+
+        if message == "(null)" || message.isEmpty {
+            return String(localized: "No error details were returned by the system")
+        }
+
+        return message
     }
 }
 
@@ -392,7 +505,6 @@ private struct LanguagePackRow: View {
     let language: TranslationLanguage
     let state: DashboardLanguagePackState
     let sourceLanguageName: String
-    let onCheck: () -> Void
     let onPrepare: () -> Void
 
     var body: some View {
@@ -406,7 +518,11 @@ private struct LanguagePackRow: View {
                 Text(language.name)
                     .font(.callout.weight(.medium))
 
-                Text("\(sourceLanguageName) → \(language.name)")
+                Text(String.localizedStringWithFormat(
+                    String(localized: "%1$@ → %2$@"),
+                    sourceLanguageName,
+                    language.name
+                ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -416,11 +532,6 @@ private struct LanguagePackRow: View {
             Text(state.message)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-
-            Button("检查") {
-                onCheck()
-            }
-            .disabled(state.isBusy)
 
             Button(state.actionTitle) {
                 onPrepare()
@@ -461,11 +572,11 @@ private enum DashboardLanguagePackState: Equatable {
     var actionTitle: String {
         switch self {
         case .preparing:
-            return "下载中..."
+            return String(localized: "Downloading...")
         case .installed:
-            return "已安装"
+            return String(localized: "Installed")
         default:
-            return "下载"
+            return String(localized: "Download")
         }
     }
 
@@ -498,19 +609,19 @@ private enum DashboardLanguagePackState: Equatable {
     var message: String {
         switch self {
         case .idle:
-            return "未检查"
+            return String(localized: "Not checked")
         case .checking:
-            return "检查中"
+            return String(localized: "Checking")
         case .installed:
-            return "已安装"
+            return String(localized: "Installed")
         case .needsDownload:
-            return "可下载"
+            return String(localized: "Available to download")
         case .preparing:
-            return "准备下载"
+            return String(localized: "Preparing download")
         case .unsupported:
-            return "不支持"
+            return String(localized: "Unsupported")
         case .failed:
-            return "下载失败"
+            return String(localized: "Download failed")
         }
     }
 }

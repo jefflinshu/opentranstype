@@ -7,10 +7,10 @@ struct ContentView: View {
                 .font(.system(size: 34))
                 .foregroundStyle(.tint)
 
-            Text("OpenTransType")
+            Text("Transtype")
                 .font(.title2.weight(.semibold))
 
-            Text("在任意 App 的文本框中右键，开启边写边译。选择目标语言后继续输入，按 ↓ 用译文覆盖原文。")
+            Text("Right-click inside any app text field to translate as you type. Pick a target language, keep typing, then press ↓ to replace the original text with the translation.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

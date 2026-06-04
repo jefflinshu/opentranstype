@@ -54,7 +54,7 @@ final class TranslationHistoryStore: ObservableObject {
         let sourceCharacterCount = records.reduce(0) { $0 + $1.sourceText.count }
         let translatedCharacterCount = records.reduce(0) { $0 + $1.translatedText.count }
         let averageSourceLength = records.isEmpty ? 0 : sourceCharacterCount / records.count
-        let latestTargetLanguage = records.first?.targetLanguageName ?? "尚未选择"
+        let latestTargetLanguage = records.first?.targetLanguageName ?? String(localized: "Not selected")
 
         return TranslationStats(
             recordCount: records.count,

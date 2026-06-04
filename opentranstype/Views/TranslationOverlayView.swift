@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 
 struct TranslationOverlayView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     private enum Layout {
         static let cornerRadius: CGFloat = 14
         static let minHeight: CGFloat = 38
@@ -19,63 +21,67 @@ struct TranslationOverlayView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            HStack(alignment: .top, spacing: 10) {
-                DragHandle(onDrag: onDrag, onDragEnded: onDragEnded)
-                    .frame(width: 16, height: 24)
-                    .help("拖拽移动工具栏")
+            let isExpanded = proxy.size.height > 58
 
-                LanguagePopUpButton(selection: $model.selectedLanguage)
-                    .frame(width: 46, height: 22)
-                    .help("选择目标语言")
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 10) {
+                    DragHandle(onDrag: onDrag, onDragEnded: onDragEnded)
+                        .frame(width: 16, height: 24)
+                        .help(String(localized: "Drag to move toolbar"))
 
-                Text(resultText)
-                    .font(.callout)
-                    .foregroundStyle(model.translatedText.isEmpty ? .secondary : .primary)
-                    .lineLimit(proxy.size.height > 58 ? 3 : 1)
-                    .truncationMode(.tail)
-                    .textSelection(.enabled)
-                    .frame(
-                        minWidth: 0,
-                        maxWidth: .infinity,
-                        minHeight: Layout.singleLineTextHeight,
-                        alignment: .topTrailing
-                    )
-                    .clipped()
-                    .layoutPriority(0)
+                    LanguagePopUpButton(selection: $model.selectedLanguage)
+                        .frame(width: 46, height: 22)
+                        .help(String(localized: "Choose target language"))
 
-                Button(action: applyOrRefresh) {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 22, height: 22)
+                    if isExpanded {
+                        Spacer(minLength: 8)
+                    } else {
+                        resultTextView(lineLimit: 1)
+                    }
+
+                    Button(action: applyOrRefresh) {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .help(model.canApplyTranslation ? String(localized: "Replace original text") : String(localized: "Read current input"))
+                    .layoutPriority(2)
+
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "Close"))
+                    .layoutPriority(2)
                 }
-                .buttonStyle(.plain)
-                .help(model.canApplyTranslation ? "覆盖原文" : "读取当前输入")
-                .layoutPriority(2)
 
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .medium))
-                        .frame(width: 22, height: 22)
+                if isExpanded {
+                    resultTextView(lineLimit: 3)
+                        .padding(.leading, 26)
                 }
-                .buttonStyle(.plain)
-                .help("关闭")
-                .layoutPriority(2)
             }
             .padding(.leading, 13)
             .padding(.trailing, 38)
             .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .overlay(alignment: .bottomTrailing) {
                 ResizeGrip(onResize: onResize, onResizeEnded: onResizeEnded)
                     .frame(width: 28, height: 28)
                     .padding(.trailing, 2)
                     .padding(.bottom, 2)
-                    .help("拖拽调整工具栏大小")
+                    .help(String(localized: "Drag to resize toolbar"))
             }
         }
         .frame(minWidth: 360, minHeight: Layout.minHeight)
         .liquidGlassPanel(cornerRadius: Layout.cornerRadius)
-        .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .shadow(color: shadowColor, radius: 8, x: 0, y: 3)
+    }
+
+    private var shadowColor: Color {
+        Color.black.opacity(colorScheme == .dark ? 0.28 : 0.06)
     }
 
     private var resultText: String {
@@ -84,6 +90,23 @@ struct TranslationOverlayView: View {
         }
 
         return model.translatedText
+    }
+
+    private func resultTextView(lineLimit: Int) -> some View {
+        Text(resultText)
+            .font(.callout)
+            .foregroundStyle(model.translatedText.isEmpty ? .secondary : .primary)
+            .lineLimit(lineLimit)
+            .truncationMode(.tail)
+            .textSelection(.enabled)
+            .frame(
+                minWidth: 0,
+                maxWidth: .infinity,
+                minHeight: Layout.singleLineTextHeight,
+                alignment: .topTrailing
+            )
+            .clipped()
+            .layoutPriority(0)
     }
 
     private func applyOrRefresh() {
@@ -247,6 +270,7 @@ private struct ResizeGrip: NSViewRepresentable {
 }
 
 struct LanguagePopUpButton: NSViewRepresentable {
+    @ObservedObject private var languageCatalog = TranslationLanguageCatalog.shared
     @Binding var selection: TranslationLanguage
 
     func makeNSView(context: Context) -> NSPopUpButton {
@@ -257,17 +281,19 @@ struct LanguagePopUpButton: NSViewRepresentable {
         button.target = context.coordinator
         button.action = #selector(Coordinator.languageChanged(_:))
         button.autoenablesItems = false
+        languageCatalog.loadIfNeeded()
         reloadItems(in: button)
         return button
     }
 
     func updateNSView(_ button: NSPopUpButton, context: Context) {
         context.coordinator.parent = self
-        if button.numberOfItems != TranslationLanguage.supported.count {
+        let languages = languageCatalog.supportedLanguages
+        if currentLanguageIDs(in: button) != languages.map(\.id) {
             reloadItems(in: button)
         }
 
-        if let index = TranslationLanguage.supported.firstIndex(where: { $0.id == selection.id }),
+        if let index = languages.firstIndex(where: { $0.id == selection.id }),
            button.indexOfSelectedItem != index {
             button.selectItem(at: index)
         }
@@ -279,17 +305,22 @@ struct LanguagePopUpButton: NSViewRepresentable {
     }
 
     private func reloadItems(in button: NSPopUpButton) {
+        let languages = languageCatalog.supportedLanguages
         button.removeAllItems()
-        for language in TranslationLanguage.supported {
+        for language in languages {
             button.addItem(withTitle: language.shortName)
             button.lastItem?.representedObject = language.id
             button.lastItem?.toolTip = language.name
         }
 
-        if let index = TranslationLanguage.supported.firstIndex(where: { $0.id == selection.id }) {
+        if let index = languages.firstIndex(where: { $0.id == selection.id }) {
             button.selectItem(at: index)
             button.title = selection.shortName
         }
+    }
+
+    private func currentLanguageIDs(in button: NSPopUpButton) -> [String] {
+        button.itemArray.compactMap { $0.representedObject as? String }
     }
 
     final class Coordinator: NSObject {
@@ -301,7 +332,7 @@ struct LanguagePopUpButton: NSViewRepresentable {
 
         @objc func languageChanged(_ sender: NSPopUpButton) {
             guard let languageID = sender.selectedItem?.representedObject as? String,
-                  let language = TranslationLanguage.language(withID: languageID) else {
+                  let language = TranslationLanguageCatalog.shared.language(withID: languageID) else {
                 return
             }
 
