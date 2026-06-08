@@ -109,6 +109,9 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             },
             onClose: { [weak self] in
                 self?.hideOverlayAfterUserClose()
+            },
+            onManageLanguages: { [weak self] in
+                self?.dashboardController?.showSettings()
             }
         )
         dashboardController = DashboardWindowController(

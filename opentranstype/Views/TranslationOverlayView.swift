@@ -15,6 +15,7 @@ struct TranslationOverlayView: View {
     let onUpgrade: () -> Void
     let onApply: () -> Void
     let onClose: () -> Void
+    let onManageLanguages: () -> Void
     let onDrag: (CGSize) -> Void
     let onDragEnded: () -> Void
     let onResize: (CGSize) -> Void
@@ -30,7 +31,7 @@ struct TranslationOverlayView: View {
                         .frame(width: 16, height: 24)
                         .help(String(localized: "Drag to move toolbar"))
 
-                    LanguagePopUpButton(selection: $model.selectedLanguage)
+                    LanguagePopUpButton(selection: $model.selectedLanguage, onManageLanguages: onManageLanguages)
                         .frame(width: 46, height: 22)
                         .help(String(localized: "Choose target language"))
 
@@ -284,8 +285,11 @@ private struct ResizeGrip: NSViewRepresentable {
 }
 
 struct LanguagePopUpButton: NSViewRepresentable {
+    private static let manageSentinel = "__manage_languages__"
+
     @ObservedObject private var languageCatalog = TranslationLanguageCatalog.shared
     @Binding var selection: TranslationLanguage
+    var onManageLanguages: () -> Void = {}
 
     func makeNSView(context: Context) -> NSPopUpButton {
         let button = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -295,6 +299,9 @@ struct LanguagePopUpButton: NSViewRepresentable {
         button.target = context.coordinator
         button.action = #selector(Coordinator.languageChanged(_:))
         button.autoenablesItems = false
+        // Keep the button showing the compact short name even though the menu items use full
+        // names. Without this, NSPopUpButton mirrors the selected item's (full-name) title.
+        button.cell.map { ($0 as? NSPopUpButtonCell)?.usesItemFromMenu = false }
         languageCatalog.loadIfNeeded()
         reloadItems(in: button)
         return button
@@ -302,39 +309,66 @@ struct LanguagePopUpButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSPopUpButton, context: Context) {
         context.coordinator.parent = self
-        let languages = languageCatalog.supportedLanguages
-        if currentLanguageIDs(in: button) != languages.map(\.id) {
+        if currentLanguageIDs(in: button) != menuLanguages.map(\.id) {
             reloadItems(in: button)
         }
 
-        if let index = languages.firstIndex(where: { $0.id == selection.id }),
+        if let index = menuLanguages.firstIndex(where: { $0.id == selection.id }),
            button.indexOfSelectedItem != index {
             button.selectItem(at: index)
         }
-        button.title = selection.shortName
+        applyButtonTitle(button)
+    }
+
+    // Show the short name on the compact toolbar button. usesItemFromMenu = false stops the
+    // popup from overwriting this with the selected menu item's full-name title.
+    fileprivate func applyButtonTitle(_ button: NSPopUpButton) {
+        guard let cell = button.cell as? NSPopUpButtonCell else {
+            button.title = selection.shortName
+            return
+        }
+
+        cell.usesItemFromMenu = false
+        cell.menuItem = NSMenuItem(title: selection.shortName, action: nil, keyEquivalent: "")
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
     }
 
+    // Only languages whose pack is installed. Always include the current selection so the
+    // toolbar never shows a blank title even if its pack check hasn't completed yet.
+    private var menuLanguages: [TranslationLanguage] {
+        var languages = languageCatalog.installedLanguages
+        if !languages.contains(where: { $0.id == selection.id }) {
+            languages.append(selection)
+            languages.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
+        return languages
+    }
+
     private func reloadItems(in button: NSPopUpButton) {
-        let languages = languageCatalog.supportedLanguages
         button.removeAllItems()
-        for language in languages {
-            button.addItem(withTitle: language.shortName)
+        for language in menuLanguages {
+            button.addItem(withTitle: language.name)
             button.lastItem?.representedObject = language.id
             button.lastItem?.toolTip = language.name
         }
 
-        if let index = languages.firstIndex(where: { $0.id == selection.id }) {
+        button.menu?.addItem(.separator())
+        let manageItem = NSMenuItem(title: String(localized: "Download languages…"), action: nil, keyEquivalent: "")
+        manageItem.representedObject = Self.manageSentinel
+        button.menu?.addItem(manageItem)
+
+        if let index = menuLanguages.firstIndex(where: { $0.id == selection.id }) {
             button.selectItem(at: index)
-            button.title = selection.shortName
         }
+        applyButtonTitle(button)
     }
 
     private func currentLanguageIDs(in button: NSPopUpButton) -> [String] {
         button.itemArray.compactMap { $0.representedObject as? String }
+            .filter { $0 != Self.manageSentinel }
     }
 
     final class Coordinator: NSObject {
@@ -345,13 +379,26 @@ struct LanguagePopUpButton: NSViewRepresentable {
         }
 
         @objc func languageChanged(_ sender: NSPopUpButton) {
-            guard let languageID = sender.selectedItem?.representedObject as? String,
-                  let language = TranslationLanguageCatalog.shared.language(withID: languageID) else {
+            guard let representedID = sender.selectedItem?.representedObject as? String else {
+                return
+            }
+
+            if representedID == LanguagePopUpButton.manageSentinel {
+                // Reselect the current language so the menu doesn't stick on the action item.
+                if let index = sender.itemArray.firstIndex(where: { $0.representedObject as? String == parent.selection.id }) {
+                    sender.selectItem(at: index)
+                }
+                parent.applyButtonTitle(sender)
+                parent.onManageLanguages()
+                return
+            }
+
+            guard let language = TranslationLanguageCatalog.shared.language(withID: representedID) else {
                 return
             }
 
             parent.selection = language
-            sender.title = parent.selection.shortName
+            parent.applyButtonTitle(sender)
         }
     }
 }

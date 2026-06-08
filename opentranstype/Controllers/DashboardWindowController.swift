@@ -1,6 +1,16 @@
 import AppKit
+import Combine
 import SwiftUI
 import Translation
+
+@MainActor
+final class DashboardNavigation: ObservableObject {
+    @Published fileprivate var section: DashboardSection = .stats
+
+    func showSettingsSection() {
+        section = .settings
+    }
+}
 
 @MainActor
 final class DashboardWindowController {
@@ -9,6 +19,7 @@ final class DashboardWindowController {
     private let model: TranslatorModel
     private let proManager: ProManager
     private let onUpgrade: () -> Void
+    private let navigation = DashboardNavigation()
     private var window: NSWindow?
     private var resizeObserver: NSObjectProtocol?
 
@@ -33,6 +44,7 @@ final class DashboardWindowController {
                 freeQuotaStore: freeQuotaStore,
                 model: model,
                 proManager: proManager,
+                navigation: navigation,
                 onUpgrade: onUpgrade
             )
             let hostingView = NSHostingView(rootView: contentView)
@@ -67,6 +79,11 @@ final class DashboardWindowController {
 
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    func showSettings() {
+        navigation.showSettingsSection()
+        show()
     }
 }
 
@@ -105,14 +122,13 @@ private struct DashboardView: View {
     @ObservedObject var freeQuotaStore: FreeQuotaStore
     @ObservedObject var model: TranslatorModel
     @ObservedObject var proManager: ProManager
+    @ObservedObject var navigation: DashboardNavigation
     let onUpgrade: () -> Void
-
-    @State private var selection: DashboardSection = .stats
 
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 14) {
-                List(DashboardSection.allCases, selection: $selection) { section in
+                List(DashboardSection.allCases, selection: $navigation.section) { section in
                     Label(section.title, systemImage: section.iconName)
                         .tag(section)
                 }
@@ -135,7 +151,7 @@ private struct DashboardView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        switch selection {
+        switch navigation.section {
         case .stats:
             StatsDashboardView(historyStore: historyStore, model: model)
         case .history:

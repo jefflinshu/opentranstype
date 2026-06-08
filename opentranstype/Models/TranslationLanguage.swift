@@ -140,6 +140,8 @@ final class TranslationLanguageCatalog: ObservableObject {
     static let shared = TranslationLanguageCatalog()
 
     @Published private(set) var supportedLanguages = TranslationLanguage.fallbackSupported
+    // ids of languages whose translation pack is installed (checked against a sample source).
+    @Published private(set) var installedLanguageIDs: Set<String> = []
 
     private var isLoading = false
     private var didAttemptLoad = false
@@ -172,6 +174,36 @@ final class TranslationLanguageCatalog: ObservableObject {
         }
 
         supportedLanguages = mappedLanguages
+        await refreshInstalledLanguages(availability: availability)
+    }
+
+    /// Determines which target languages already have an installed pack, by checking each
+    /// against a representative source language (English, or Chinese for English itself).
+    func refreshInstalledLanguages(availability: LanguageAvailability? = nil) async {
+        let availability = availability ?? LanguageAvailability()
+        var installed: Set<String> = []
+
+        for language in supportedLanguages {
+            let source = Self.sampleSource(for: language.language)
+            let status = await availability.status(from: source, to: language.language)
+            if status == .installed {
+                installed.insert(language.id)
+            }
+        }
+
+        installedLanguageIDs = installed
+    }
+
+    var installedLanguages: [TranslationLanguage] {
+        supportedLanguages.filter { installedLanguageIDs.contains($0.id) }
+    }
+
+    nonisolated private static func sampleSource(for language: Locale.Language) -> Locale.Language {
+        if language.languageCode?.identifier == "en" {
+            return Locale.Language(identifier: "zh-Hans")
+        }
+
+        return Locale.Language(identifier: "en")
     }
 
     func language(withID id: String) -> TranslationLanguage? {
