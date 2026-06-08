@@ -55,6 +55,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private let model: TranslatorModel
     private let proManager = ProManager.shared
     private let accessibility = AccessibilityTextController()
+    private let localSpeechService = LocalSpeechTranscriptionService()
     private var overlayController: OverlayWindowController?
     private var onboardingController: OnboardingWindowController?
     private var dashboardController: DashboardWindowController?
@@ -72,7 +73,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var frontmostMonitorTick = 0
     private var lastAXMissLogAt = Date.distantPast
     private var lastAutomaticText = ""
+    private var commandModifierIsDown = false
+    private var lastCommandTapAt = Date.distantPast
     private var didStartTranslationExperience = false
+    private var isOverlaySuppressedAfterUserClose = false
     private let initialPaywallShownKey = "didShowInitialPaywall"
 
     override init() {
@@ -653,7 +657,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func installKeyEventTap() {
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let mask = CGEventMask(
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.flagsChanged.rawValue)
+        )
         let callback: CGEventTapCallBack = { proxy, type, event, refcon in
             guard let refcon else {
                 return Unmanaged.passUnretained(event)
@@ -700,6 +707,13 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
+        if type == .flagsChanged {
+            Task { @MainActor in
+                self.handleModifierFlagsChanged(flags)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
         if type == .keyDown, keyCode == 0, flags.contains(.maskCommand) {
             Task { @MainActor in
                 self.scheduleUserSelectedTextRead()
@@ -722,6 +736,96 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
 
         return Unmanaged.passUnretained(event)
+    }
+
+    private func handleModifierFlagsChanged(_ flags: CGEventFlags) {
+        let commandIsDown = flags.contains(.maskCommand)
+        guard commandIsDown != commandModifierIsDown else {
+            return
+        }
+
+        commandModifierIsDown = commandIsDown
+
+        guard commandIsDown else {
+            return
+        }
+
+        let now = Date()
+        if now.timeIntervalSince(lastCommandTapAt) <= 0.45 {
+            lastCommandTapAt = .distantPast
+            startCommandDoubleTapWorkflow()
+        } else {
+            lastCommandTapAt = now
+        }
+    }
+
+    private func startCommandDoubleTapWorkflow() {
+        automaticReadTask?.cancel()
+        isOverlaySuppressedAfterUserClose = false
+        model.enable()
+        model.statusText = String(localized: "Reading input...")
+        overlayController?.show(near: accessibility.focusedElementFrame())
+        refreshStatusMenu()
+        DiagnosticLog.write("command double tap triggered")
+
+        automaticReadTask = Task { @MainActor in
+            await toggleLocalVoiceInput()
+        }
+    }
+
+    private func toggleLocalVoiceInput() async {
+        if localSpeechService.isRecording {
+            await finishLocalVoiceInput()
+            return
+        }
+
+        guard ensureTranslationAccess(showPaywall: true) else {
+            overlayController?.show(near: accessibility.focusedElementFrame())
+            return
+        }
+
+        guard let modelURL = model.speechModelManager.selectedModelURL else {
+            model.translatedText = ""
+            model.statusText = String(localized: "Download or select a local voice model")
+            overlayController?.show(near: accessibility.focusedElementFrame())
+            dashboardController?.show()
+            DiagnosticLog.write("local voice start blocked, no selected model")
+            return
+        }
+
+        do {
+            model.translatedText = ""
+            model.statusText = String(localized: "Loading voice model...")
+            try await localSpeechService.prepareModel(at: modelURL)
+
+            model.statusText = String(localized: "Listening... double-tap Command to stop")
+            try await localSpeechService.startRecording()
+        } catch {
+            model.translatedText = ""
+            model.statusText = String(localized: "Voice input failed")
+            DiagnosticLog.write("local voice start failed error=\(error.localizedDescription)")
+        }
+    }
+
+    private func finishLocalVoiceInput() async {
+        model.translatedText = ""
+        model.statusText = String(localized: "Transcribing voice...")
+
+        guard let text = await localSpeechService.stopRecordingAndTranscribe(),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            model.statusText = String(localized: "No speech detected")
+            DiagnosticLog.write("local voice transcription empty")
+            return
+        }
+
+        guard canTranslateManualText(text, source: "local voice") else {
+            return
+        }
+
+        model.enable()
+        overlayController?.show(near: accessibility.focusedElementFrame())
+        model.forceTranslation(for: text)
+        DiagnosticLog.write("local voice text accepted length=\(text.count)")
     }
 
     private func scheduleUserSelectedTextRead() {

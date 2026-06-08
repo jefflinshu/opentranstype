@@ -401,6 +401,10 @@ private struct SettingsDashboardView: View {
                 .padding(18)
                 .liquidGlassPanel(cornerRadius: 10)
 
+                LocalSpeechModelsSettingsView(modelManager: model.speechModelManager)
+                    .padding(18)
+                    .liquidGlassPanel(cornerRadius: 10)
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Support and legal")
                         .font(.title3.weight(.semibold))
@@ -599,6 +603,169 @@ private struct SettingsDashboardView: View {
         }
 
         return message
+    }
+}
+
+private struct LocalSpeechModelsSettingsView: View {
+    @ObservedObject var modelManager: LocalSpeechModelManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Local voice models")
+                        .font(.title3.weight(.semibold))
+
+                    Text("Download Whisper speech-to-text models for future offline voice input. Models are stored locally on this Mac.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    modelManager.openModelsFolder()
+                } label: {
+                    Label("Folder", systemImage: "folder")
+                }
+                .controlSize(.small)
+            }
+
+            if let selectedModel = modelManager.selectedModel {
+                Label(
+                    String.localizedStringWithFormat(String(localized: "Selected: %@"), selectedModel.name),
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.green)
+            } else {
+                Label("No local voice model selected", systemImage: "waveform.badge.magnifyingglass")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(LocalSpeechModel.available) { speechModel in
+                    LocalSpeechModelRow(
+                        speechModel: speechModel,
+                        isDownloaded: modelManager.isDownloaded(speechModel),
+                        isSelected: modelManager.selectedModelFilename == speechModel.filename,
+                        isDownloading: modelManager.downloadingModelID == speechModel.id,
+                        progress: modelManager.downloadProgress[speechModel.id] ?? 0,
+                        onDownload: { modelManager.download(speechModel) },
+                        onSelect: { modelManager.select(speechModel) },
+                        onDelete: { modelManager.delete(speechModel) },
+                        onCancel: { modelManager.cancelDownload() }
+                    )
+
+                    if speechModel.id != LocalSpeechModel.available.last?.id {
+                        Divider()
+                            .padding(.leading, 36)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct LocalSpeechModelRow: View {
+    let speechModel: LocalSpeechModel
+    let isDownloaded: Bool
+    let isSelected: Bool
+    let isDownloading: Bool
+    let progress: Double
+    let onDownload: () -> Void
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(speechModel.name)
+                        .font(.callout.weight(.medium))
+
+                    Text(speechModel.size)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(speechModel.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            if isDownloading {
+                ProgressView(value: progress)
+                    .frame(width: 80)
+
+                Text("\(Int(progress * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    onCancel()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            } else if isDownloaded {
+                Button(isSelected ? "Selected" : "Use") {
+                    onSelect()
+                }
+                .disabled(isSelected)
+                .controlSize(.small)
+
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.red.opacity(0.85))
+            } else {
+                Button {
+                    onDownload()
+                } label: {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private var iconName: String {
+        if isSelected {
+            return "checkmark.circle.fill"
+        }
+
+        if isDownloaded {
+            return "externaldrive.fill"
+        }
+
+        return "waveform"
+    }
+
+    private var iconColor: Color {
+        if isSelected {
+            return .green
+        }
+
+        if isDownloaded {
+            return .accentColor
+        }
+
+        return .secondary
     }
 }
 

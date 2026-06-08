@@ -12,6 +12,7 @@ final class TranslatorModel: ObservableObject {
     private let freeQuotaStore: FreeQuotaStore?
     private let proManager: ProManager?
     private let languageCatalog: TranslationLanguageCatalog
+    let speechModelManager = LocalSpeechModelManager()
 
     @Published var isEnabled = true
     @Published var sourceText = ""

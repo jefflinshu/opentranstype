@@ -6,14 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXFileReference section */
-		6F0A00012FD1000000000001 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
-		6FE25D782FD029EE0085BA4D /* opentranstype.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = opentranstype.app; sourceTree = BUILT_PRODUCTS_DIR; };
-/* End PBXFileReference section */
-
 /* Begin PBXBuildFile section */
 		6F0A00022FD1000000000002 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6F0A00012FD1000000000001 /* StoreKit.framework */; };
+		6F0B00022FD2000000000002 /* whisper.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6F0B00012FD2000000000001 /* whisper.xcframework */; };
+		6F0B00032FD2000000000003 /* whisper.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 6F0B00012FD2000000000001 /* whisper.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		6F0B00042FD2000000000004 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				6F0B00032FD2000000000003 /* whisper.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		6F0A00012FD1000000000001 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
+		6F0B00012FD2000000000001 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = whisper.xcframework; sourceTree = "<group>"; };
+		6FE25D782FD029EE0085BA4D /* opentranstype.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = opentranstype.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6FE25D7A2FD029EE0085BA4D /* opentranstype */ = {
@@ -29,6 +46,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6F0A00022FD1000000000002 /* StoreKit.framework in Frameworks */,
+				6F0B00022FD2000000000002 /* whisper.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -40,6 +58,7 @@
 			children = (
 				6FE25D7A2FD029EE0085BA4D /* opentranstype */,
 				6F0A00012FD1000000000001 /* StoreKit.framework */,
+				6F0B00012FD2000000000001 /* whisper.xcframework */,
 				6FE25D792FD029EE0085BA4D /* Products */,
 			);
 			sourceTree = "<group>";
@@ -62,6 +81,7 @@
 				6FE25D742FD029EE0085BA4D /* Sources */,
 				6FE25D752FD029EE0085BA4D /* Frameworks */,
 				6FE25D762FD029EE0085BA4D /* Resources */,
+				6F0B00042FD2000000000004 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -281,6 +301,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Transtype needs microphone access to record speech for local transcription.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -318,6 +339,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Transtype needs microphone access to record speech for local transcription.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
