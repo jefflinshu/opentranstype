@@ -367,26 +367,29 @@ private struct SettingsDashboardView: View {
                 .padding(18)
                 .liquidGlassPanel(cornerRadius: 10)
 
-                HStack(alignment: .center, spacing: 14) {
-                    Image(systemName: "globe")
-                        .font(.title2)
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 34)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .center, spacing: 14) {
+                        Image(systemName: "globe")
+                            .font(.title2)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 34)
 
-                    Text("Default target language")
-                        .font(.title3.weight(.semibold))
+                        Text("Default target language")
+                            .font(.title3.weight(.semibold))
 
-                    Spacer()
+                        Spacer()
 
-                    Picker("Default target language", selection: selectedLanguageIDBinding) {
-                        ForEach(pickerLanguages) { language in
-                            Text(language.name).tag(language.id)
+                        Picker("Default target language", selection: selectedLanguageIDBinding) {
+                            ForEach(pickerLanguages) { language in
+                                Text(language.name).tag(language.id)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: 220, alignment: .trailing)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
                 .liquidGlassPanel(cornerRadius: 10)
 
@@ -616,7 +619,10 @@ private struct SettingsDashboardView: View {
         ensuring selectedLanguage: TranslationLanguage,
         in languages: [TranslationLanguage]
     ) -> [TranslationLanguage] {
-        guard !languages.contains(selectedLanguage) else {
+        // Compare by id, not the whole struct: if the catalog's instance differs from the
+        // model's selected instance in any field, equality-by-struct would append a duplicate
+        // id and break the picker's selection. id is the stable key.
+        guard !languages.contains(where: { $0.id == selectedLanguage.id }) else {
             return languages
         }
 
