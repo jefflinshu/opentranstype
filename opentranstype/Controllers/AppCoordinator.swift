@@ -76,8 +76,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var frontmostMonitorTick = 0
     private var lastAXMissLogAt = Date.distantPast
     private var lastAutomaticText = ""
-    private var commandModifierIsDown = false
-    private var lastCommandTapAt = Date.distantPast
     private var didStartTranslationExperience = false
     private var isOverlaySuppressedAfterUserClose = false
     private let initialPaywallShownKey = "didShowInitialPaywall"
@@ -206,6 +204,19 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         showOverlayFromUserRequest(near: nil)
     }
 
+    @objc private func toggleVoiceInputFromStatusItem() {
+        isOverlaySuppressedAfterUserClose = false
+        model.enable()
+        overlayController?.show(near: accessibility.focusedElementFrame())
+        refreshStatusMenu()
+
+        automaticReadTask?.cancel()
+        automaticReadTask = Task { @MainActor in
+            await toggleLocalVoiceInput()
+            refreshStatusMenu()
+        }
+    }
+
     private func showOverlayFromUserRequest(near axFrame: CGRect?) {
         isOverlaySuppressedAfterUserClose = false
         model.enable()
@@ -248,6 +259,15 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             menu.addItem(NSMenuItem(
                 title: model.isEnabled ? String(localized: "Disable translation") : String(localized: "Enable translation"),
                 action: #selector(toggleTranslationFromStatusItem),
+                keyEquivalent: ""
+            ))
+        }
+        if !model.isUpgradeRequired {
+            menu.addItem(NSMenuItem(
+                title: localSpeechService.isRecording
+                    ? String(localized: "Stop voice input")
+                    : String(localized: "Start voice input"),
+                action: #selector(toggleVoiceInputFromStatusItem),
                 keyEquivalent: ""
             ))
         }
@@ -730,10 +750,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func installKeyEventTap() {
-        let mask = CGEventMask(
-            (1 << CGEventType.keyDown.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue)
-        )
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
         let callback: CGEventTapCallBack = { proxy, type, event, refcon in
             guard let refcon else {
                 return Unmanaged.passUnretained(event)
@@ -780,13 +797,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        if type == .flagsChanged {
-            Task { @MainActor in
-                self.handleModifierFlagsChanged(flags)
-            }
-            return Unmanaged.passUnretained(event)
-        }
-
         if type == .keyDown, keyCode == 0, flags.contains(.maskCommand) {
             Task { @MainActor in
                 self.scheduleUserSelectedTextRead()
@@ -809,41 +819,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
 
         return Unmanaged.passUnretained(event)
-    }
-
-    private func handleModifierFlagsChanged(_ flags: CGEventFlags) {
-        let commandIsDown = flags.contains(.maskCommand)
-        guard commandIsDown != commandModifierIsDown else {
-            return
-        }
-
-        commandModifierIsDown = commandIsDown
-
-        guard commandIsDown else {
-            return
-        }
-
-        let now = Date()
-        if now.timeIntervalSince(lastCommandTapAt) <= 0.45 {
-            lastCommandTapAt = .distantPast
-            startCommandDoubleTapWorkflow()
-        } else {
-            lastCommandTapAt = now
-        }
-    }
-
-    private func startCommandDoubleTapWorkflow() {
-        automaticReadTask?.cancel()
-        isOverlaySuppressedAfterUserClose = false
-        model.enable()
-        model.statusText = String(localized: "Reading input...")
-        overlayController?.show(near: accessibility.focusedElementFrame())
-        refreshStatusMenu()
-        DiagnosticLog.write("command double tap triggered")
-
-        automaticReadTask = Task { @MainActor in
-            await toggleLocalVoiceInput()
-        }
     }
 
     private func toggleLocalVoiceInput() async {
@@ -871,7 +846,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             model.statusText = String(localized: "Loading voice model...")
             try await localSpeechService.prepareModel(at: modelURL)
 
-            model.statusText = String(localized: "Listening... double-tap Command to stop")
+            model.statusText = String(localized: "Listening... stop voice input from the menu bar")
             try await localSpeechService.startRecording()
         } catch {
             model.translatedText = ""
