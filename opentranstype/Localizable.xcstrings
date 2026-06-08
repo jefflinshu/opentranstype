@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ per %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ per %2$@"
+          }
+        }
+      }
+    },
     "%1$@ → %2$@" : {
       "localizations" : {
         "de" : {
@@ -261,6 +271,12 @@
         }
       }
     },
+    "An unexpected StoreKit result occurred." : {
+
+    },
+    "Apply translated text in place." : {
+
+    },
     "Asking the system to prepare the language pack" : {
       "localizations" : {
         "de" : {
@@ -468,6 +484,9 @@
           }
         }
       }
+    },
+    "Best Value" : {
+
     },
     "Check Again" : {
       "localizations" : {
@@ -1093,6 +1112,9 @@
         }
       }
     },
+    "day" : {
+
+    },
     "Default target language" : {
       "localizations" : {
         "de" : {
@@ -1665,6 +1687,18 @@
         }
       }
     },
+    "Free limit reached. Upgrade to continue." : {
+
+    },
+    "Free quota" : {
+
+    },
+    "Free translations reset every month." : {
+
+    },
+    "Full local history" : {
+
+    },
     "Get Started" : {
       "localizations" : {
         "de" : {
@@ -1820,6 +1854,12 @@
           }
         }
       }
+    },
+    "Keep recent writing context available." : {
+
+    },
+    "Keep translation flowing across every macOS writing surface." : {
+
     },
     "Keep typing" : {
       "localizations" : {
@@ -2133,6 +2173,15 @@
         }
       }
     },
+    "Language workflow" : {
+
+    },
+    "Lifetime" : {
+
+    },
+    "Lifetime access is active." : {
+
+    },
     "Listening for input" : {
       "localizations" : {
         "de" : {
@@ -2237,6 +2286,24 @@
         }
       }
     },
+    "Loading..." : {
+
+    },
+    "Manage" : {
+
+    },
+    "Manage target languages and packs." : {
+
+    },
+    "month" : {
+
+    },
+    "Monthly Plan" : {
+
+    },
+    "Monthly plan is active." : {
+
+    },
     "Next" : {
       "localizations" : {
         "de" : {
@@ -2288,6 +2355,9 @@
           }
         }
       }
+    },
+    "No active Transtype Pro purchases were found for this App Store account." : {
+
     },
     "No error details were returned by the system" : {
       "localizations" : {
@@ -2549,6 +2619,12 @@
         }
       }
     },
+    "Nothing to Restore" : {
+
+    },
+    "OK" : {
+
+    },
     "Once the translation is ready, press ↓ or click the overlay button to replace the original text." : {
       "localizations" : {
         "de" : {
@@ -2600,6 +2676,12 @@
           }
         }
       }
+    },
+    "One-click replace" : {
+
+    },
+    "One-time purchase for %@" : {
+
     },
     "Open Accessibility Settings" : {
       "localizations" : {
@@ -2966,7 +3048,31 @@
         }
       }
     },
+    "Price shown after App Store connection" : {
+
+    },
     "Privacy Policy" : {
+
+    },
+    "Pro access is active." : {
+
+    },
+    "Pro quota" : {
+
+    },
+    "Purchase Complete" : {
+
+    },
+    "Purchase Couldn’t Be Verified" : {
+
+    },
+    "Purchase Error" : {
+
+    },
+    "Purchase Pending" : {
+
+    },
+    "Purchases Restored" : {
 
     },
     "Quit" : {
@@ -3332,6 +3438,12 @@
           }
         }
       }
+    },
+    "Restore Failed" : {
+
+    },
+    "Restore Purchases" : {
+
     },
     "Right-click inside any app text field to translate as you type. Pick a target language, keep typing, then press ↓ to replace the original text with the translation." : {
       "localizations" : {
@@ -3749,6 +3861,12 @@
         }
       }
     },
+    "Store Unavailable" : {
+
+    },
+    "Subscriptions renew automatically unless cancelled at least 24 hours before the end of the current period." : {
+
+    },
     "Support" : {
 
     },
@@ -3806,6 +3924,9 @@
           }
         }
       }
+    },
+    "Terms of Service" : {
+
     },
     "Terms of Use" : {
 
@@ -3914,6 +4035,9 @@
         }
       }
     },
+    "This purchase is pending approval. Transtype will unlock Pro automatically when StoreKit confirms it." : {
+
+    },
     "This sample language pair is not supported by the system" : {
       "localizations" : {
         "de" : {
@@ -3965,6 +4089,9 @@
           }
         }
       }
+    },
+    "Translate without daily caps." : {
+
     },
     "Translated characters" : {
       "localizations" : {
@@ -4385,6 +4512,18 @@
     "Transtype" : {
 
     },
+    "Transtype Pro" : {
+
+    },
+    "Transtype Pro active" : {
+
+    },
+    "Transtype Pro is active" : {
+
+    },
+    "Transtype Pro is now active." : {
+
+    },
     "Type in any app text field and see the translation instantly." : {
       "localizations" : {
         "de" : {
@@ -4437,6 +4576,18 @@
         }
       }
     },
+    "Unable to fetch product information." : {
+
+    },
+    "Unlimited" : {
+
+    },
+    "Unlimited translations" : {
+
+    },
+    "Unlimited translations are active." : {
+
+    },
     "Unsupported" : {
       "localizations" : {
         "de" : {
@@ -4488,6 +4639,21 @@
           }
         }
       }
+    },
+    "Upgrade" : {
+
+    },
+    "Upgrade required" : {
+
+    },
+    "Upgrade to continue" : {
+
+    },
+    "Upgrade to Pro" : {
+
+    },
+    "Upgrade to Transtype Pro" : {
+
     },
     "Use these links for support, privacy, and terms while preparing the App Store listing." : {
 
@@ -4544,6 +4710,9 @@
         }
       }
     },
+    "week" : {
+
+    },
     "Welcome" : {
       "localizations" : {
         "de" : {
@@ -4595,6 +4764,21 @@
           }
         }
       }
+    },
+    "year" : {
+
+    },
+    "Yearly Plan" : {
+
+    },
+    "Yearly plan is active." : {
+
+    },
+    "Your current App Store account already has the highest Transtype Pro entitlement." : {
+
+    },
+    "Your Transtype Pro access is available on this device." : {
+
     }
   },
   "version" : "1.2"

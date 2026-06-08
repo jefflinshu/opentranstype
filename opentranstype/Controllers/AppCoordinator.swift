@@ -61,10 +61,13 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var dashboardController: DashboardWindowController?
     private var paywallWindow: NSWindow?
     private var statusItem: NSStatusItem?
-    private var rightMouseMonitor: Any?
     private var activeApplicationObserver: NSObjectProtocol?
     private var keyEventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var mouseDownMonitor: Any?
+    private var mouseUpMonitor: Any?
+    private var mouseDownLocation: CGPoint?
+    private var mouseSelectionTask: Task<Void, Never>?
     private var automaticReadTask: Task<Void, Never>?
     private var storeKitUpdatesTask: Task<Void, Never>?
     private var proStateCancellable: AnyCancellable?
@@ -105,6 +108,9 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             },
             onUpgrade: { [weak self] in
                 self?.showPaywall()
+            },
+            onClose: { [weak self] in
+                self?.hideOverlayAfterUserClose()
             }
         )
         dashboardController = DashboardWindowController(
@@ -132,6 +138,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         dashboardController?.show()
+        showOverlayFromUserRequest(near: nil)
         return true
     }
 
@@ -196,12 +203,24 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showOverlayFromStatusItem() {
+        showOverlayFromUserRequest(near: nil)
+    }
+
+    private func showOverlayFromUserRequest(near axFrame: CGRect?) {
+        isOverlaySuppressedAfterUserClose = false
         model.enable()
         model.statusText = model.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? String(localized: "Listening for input")
             : model.statusText
-        overlayController?.show(near: nil)
+        overlayController?.show(near: axFrame)
         refreshStatusMenu()
+    }
+
+    private func hideOverlayAfterUserClose() {
+        isOverlaySuppressedAfterUserClose = true
+        overlayController?.hide()
+        refreshStatusMenu()
+        DiagnosticLog.write("overlay hidden by user")
     }
 
     @objc private func quitFromStatusItem() {
@@ -364,17 +383,100 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         accessibility.startObservingTextChanges { [weak self] text in
             self?.handleObservedText(text)
         }
-        installRightClickMonitor()
         installKeyEventTap()
+        installMouseSelectionMonitors()
         overlayController?.show(near: nil)
         DiagnosticLog.write("overlay shown")
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        if let rightMouseMonitor {
-            NSEvent.removeMonitor(rightMouseMonitor)
+    private func installMouseSelectionMonitors() {
+        guard mouseDownMonitor == nil, mouseUpMonitor == nil else {
+            return
         }
 
+        // Passive global monitors observe events in *other* apps without intercepting them, so
+        // they never alter other apps' behavior and never fire for our own overlay window.
+        mouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.mouseDownLocation = NSEvent.mouseLocation
+            }
+        }
+
+        mouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleGlobalMouseUp()
+            }
+        }
+        DiagnosticLog.write("mouse selection monitors installed")
+    }
+
+    private func handleGlobalMouseUp() {
+        defer { mouseDownLocation = nil }
+
+        guard let start = mouseDownLocation else {
+            return
+        }
+
+        let end = NSEvent.mouseLocation
+        let distance = hypot(end.x - start.x, end.y - start.y)
+        guard distance > 5 else {
+            return
+        }
+
+        scheduleMouseSelectedTextRead()
+    }
+
+    private func scheduleMouseSelectedTextRead() {
+        mouseSelectionTask?.cancel()
+        mouseSelectionTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await readMouseSelectedText()
+        }
+    }
+
+    private func readMouseSelectedText() async {
+        // Only act while an active translation session is on screen, so casual drag-selecting
+        // in other apps never pops the overlay open unexpectedly.
+        guard !isOverlaySuppressedAfterUserClose,
+              model.isEnabled,
+              overlayController?.isVisible == true else {
+            return
+        }
+
+        guard ensureTranslationAccess(showPaywall: false) else {
+            return
+        }
+
+        if let axText = accessibility.currentSelectedText()?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !axText.isEmpty {
+            guard canTranslateManualText(axText, source: "mouse selection AX") else {
+                return
+            }
+
+            model.enable()
+            overlayController?.show(near: accessibility.focusedElementFrame())
+            model.forceTranslation(for: axText)
+            DiagnosticLog.write("mouse selection AX text length=\(axText.count), element=\(accessibility.focusedElementDebugSummary())")
+            return
+        }
+
+        if let copiedText = await accessibility.readTextByCopyingCurrentField(collapseSelection: false, allowSelectAll: false) {
+            guard canTranslateManualText(copiedText, source: "mouse selection copy") else {
+                return
+            }
+
+            model.enable()
+            overlayController?.show(near: accessibility.focusedElementFrame())
+            model.forceTranslation(for: copiedText)
+            DiagnosticLog.write("mouse selection copy text length=\(copiedText.count), app=\(accessibility.focusedApplicationBundleIdentifier() ?? "unknown")")
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
         if let activeApplicationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(activeApplicationObserver)
         }
@@ -382,6 +484,16 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         accessibility.stopObservingTextChanges()
         frontmostMonitor?.invalidate()
         frontmostMonitor = nil
+        if let mouseDownMonitor {
+            NSEvent.removeMonitor(mouseDownMonitor)
+        }
+        mouseDownMonitor = nil
+        if let mouseUpMonitor {
+            NSEvent.removeMonitor(mouseUpMonitor)
+        }
+        mouseUpMonitor = nil
+        mouseSelectionTask?.cancel()
+        mouseSelectionTask = nil
         automaticReadTask?.cancel()
         automaticReadTask = nil
         storeKitUpdatesTask?.cancel()
@@ -484,49 +596,6 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         acceptAutomaticText(trimmedText, source: "observed")
     }
 
-    private func installRightClickMonitor() {
-        rightMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in
-                await self?.showOverlayForFocusedText(at: NSEvent.mouseLocation)
-            }
-        }
-    }
-
-    private func showOverlayForFocusedText(at appKitPoint: CGPoint? = nil) async {
-        guard ensureTranslationAccess(showPaywall: true) else {
-            overlayController?.show(near: nil)
-            return
-        }
-
-        if !accessibility.requestPermission() {
-            overlayController?.show(near: nil)
-            model.statusText = String(localized: "Allow Accessibility access in System Settings")
-            DiagnosticLog.write("accessibility permission missing")
-            return
-        }
-
-        let didFindElement = appKitPoint.map { accessibility.refreshEditableElement(at: $0) }
-            ?? accessibility.refreshEditableElementAtMouseLocation()
-        DiagnosticLog.write("manual bind didFindElement=\(didFindElement), element=\(accessibility.focusedElementDebugSummary())")
-
-        model.enable()
-        accessibility.observeCurrentFocusedElement()
-        overlayController?.show(near: didFindElement ? accessibility.focusedElementFrame() : nil)
-
-        let axText = didFindElement ? accessibility.currentText().trimmingCharacters(in: .whitespacesAndNewlines) : ""
-        if !axText.isEmpty {
-            guard canTranslateManualText(axText, source: "manual AX") else {
-                return
-            }
-
-            DiagnosticLog.write("manual AX text length=\(axText.count)")
-            model.forceTranslation(for: axText)
-            return
-        }
-
-        await refreshCurrentText(showFailure: true)
-    }
-
     private func refreshCurrentText(showFailure: Bool = true) async {
         guard ensureTranslationAccess(showPaywall: true) else {
             overlayController?.show(near: accessibility.focusedElementFrame())
@@ -592,6 +661,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
 
     @discardableResult
     private func acceptAutomaticText(_ text: String, source: String) -> Bool {
+        guard !isOverlaySuppressedAfterUserClose else {
+            return false
+        }
+
         guard ensureTranslationAccess(showPaywall: true) else {
             if overlayController?.isVisible != true {
                 overlayController?.show(near: accessibility.focusedElementFrame())
@@ -841,6 +914,11 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     }
 
     private func readUserSelectedText() async {
+        guard !isOverlaySuppressedAfterUserClose else {
+            DiagnosticLog.write("selected text read ignored after user close")
+            return
+        }
+
         guard ensureTranslationAccess(showPaywall: true) else {
             overlayController?.show(near: accessibility.focusedElementFrame())
             return

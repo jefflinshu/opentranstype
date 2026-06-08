@@ -172,6 +172,30 @@ final class AccessibilityTextController {
         return readableText(from: focusedElement) ?? ""
     }
 
+    /// Reads only the currently selected text (not the whole field), querying the system-wide
+    /// focused element. Used for mouse drag-selection / Cmd+A so a terminal's huge scrollback
+    /// never gets read as one over-long block. Returns nil when nothing is selected.
+    func currentSelectedText() -> String? {
+        guard isTrusted else {
+            return nil
+        }
+
+        let systemElement = AXUIElementCreateSystemWide()
+        guard let value = copyAttributeValue(kAXFocusedUIElementAttribute as String, from: systemElement),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return nil
+        }
+
+        let focused = value as! AXUIElement
+        guard let selected = stringAttribute(kAXSelectedTextAttribute as String, from: focused)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !selected.isEmpty else {
+            return nil
+        }
+
+        return selected
+    }
+
     func logFocusedElementDiagnostics(reason: String) {
         guard isTrusted else {
             return
@@ -269,7 +293,7 @@ final class AccessibilityTextController {
         return currentUserFacingApplication()?.bundleIdentifier
     }
 
-    func readTextByCopyingCurrentField(collapseSelection: Bool = false) async -> String? {
+    func readTextByCopyingCurrentField(collapseSelection: Bool = false, allowSelectAll: Bool = true) async -> String? {
         let pasteboard = NSPasteboard.general
         let previousItems = pasteboard.pasteboardItems?.compactMap { item -> NSPasteboardItem? in
             let copy = NSPasteboardItem()
@@ -289,7 +313,7 @@ final class AccessibilityTextController {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         var usedSelectAll = false
 
-        if copiedText?.isEmpty != false {
+        if allowSelectAll, copiedText?.isEmpty != false {
             pasteboard.clearContents()
             sendKey(.maskCommand, virtualKey: 0)
             usedSelectAll = true

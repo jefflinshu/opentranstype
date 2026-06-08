@@ -319,6 +319,23 @@ private struct SettingsDashboardView: View {
     @State private var pendingPreparationConfiguration: TranslationSession.Configuration?
     @State private var preparingLanguageID: String?
     @State private var isShowingPaywall = false
+    @State private var modelsTab: ModelsTab = .languagePacks
+
+    private enum ModelsTab: String, CaseIterable, Identifiable {
+        case languagePacks
+        case voiceModels
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .languagePacks:
+                return String(localized: "Language packs")
+            case .voiceModels:
+                return String(localized: "Voice models")
+            }
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -350,68 +367,51 @@ private struct SettingsDashboardView: View {
                 .padding(18)
                 .liquidGlassPanel(cornerRadius: 10)
 
-                VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 14) {
+                    Image(systemName: "globe")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 34)
+
                     Text("Default target language")
                         .font(.title3.weight(.semibold))
 
-                    Picker("Default target language", selection: $model.selectedLanguage) {
+                    Spacer()
+
+                    Picker("Default target language", selection: selectedLanguageIDBinding) {
                         ForEach(pickerLanguages) { language in
-                            Text(language.name).tag(language)
+                            Text(language.name).tag(language.id)
                         }
                     }
+                    .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 280, alignment: .leading)
-
-                    Text(String.localizedStringWithFormat(
-                        String(localized: "Current default: %@"),
-                        model.selectedLanguage.name
-                    ))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    .frame(maxWidth: 220, alignment: .trailing)
                 }
                 .padding(18)
                 .liquidGlassPanel(cornerRadius: 10)
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Language packs")
-                        .font(.title3.weight(.semibold))
-
-                    Text("Automatically checks on-device translation language packs. The source language is detected from your input when translating.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-
-                    VStack(spacing: 0) {
-                        ForEach(languageCatalog.supportedLanguages) { language in
-                            LanguagePackRow(
-                                language: language,
-                                state: languagePackStates[language.id] ?? .idle,
-                                sourceLanguageName: sampleSourceLanguageName(for: language),
-                                onPrepare: {
-                                    prepareLanguagePack(for: language)
-                                }
-                            )
-
-                            if language.id != languageCatalog.supportedLanguages.last?.id {
-                                Divider()
-                                    .padding(.leading, 36)
-                            }
+                VStack(alignment: .leading, spacing: 14) {
+                    Picker("Models", selection: $modelsTab) {
+                        ForEach(ModelsTab.allCases) { tab in
+                            Text(tab.title).tag(tab)
                         }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    switch modelsTab {
+                    case .languagePacks:
+                        languagePacksSection
+                    case .voiceModels:
+                        LocalSpeechModelsSettingsView(modelManager: model.speechModelManager)
                     }
                 }
                 .padding(18)
                 .liquidGlassPanel(cornerRadius: 10)
-
-                LocalSpeechModelsSettingsView(modelManager: model.speechModelManager)
-                    .padding(18)
-                    .liquidGlassPanel(cornerRadius: 10)
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Support and legal")
                         .font(.title3.weight(.semibold))
-
-                    Text("Use these links for support, privacy, and terms while preparing the App Store listing.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
 
                     VStack(alignment: .leading, spacing: 10) {
                         Link(destination: supportURL) {
@@ -479,6 +479,28 @@ private struct SettingsDashboardView: View {
             }
         }
         .navigationTitle(DashboardSection.settings.title)
+    }
+
+    private var languagePacksSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 0) {
+                ForEach(languageCatalog.supportedLanguages) { language in
+                    LanguagePackRow(
+                        language: language,
+                        state: languagePackStates[language.id] ?? .idle,
+                        sourceLanguageName: sampleSourceLanguageName(for: language),
+                        onPrepare: {
+                            prepareLanguagePack(for: language)
+                        }
+                    )
+
+                    if language.id != languageCatalog.supportedLanguages.last?.id {
+                        Divider()
+                            .padding(.leading, 36)
+                    }
+                }
+            }
+        }
     }
 
     private var activePlanDescription: String {
@@ -577,6 +599,19 @@ private struct SettingsDashboardView: View {
         mergedLanguages(ensuring: model.selectedLanguage, in: languageCatalog.supportedLanguages)
     }
 
+    // Bind the Picker by language id (String) rather than the whole struct, so the current
+    // selection always matches an item in the list and shows up as selected.
+    private var selectedLanguageIDBinding: Binding<String> {
+        Binding(
+            get: { model.selectedLanguage.id },
+            set: { newID in
+                if let language = pickerLanguages.first(where: { $0.id == newID }) {
+                    model.selectedLanguage = language
+                }
+            }
+        )
+    }
+
     private func mergedLanguages(
         ensuring selectedLanguage: TranslationLanguage,
         in languages: [TranslationLanguage]
@@ -612,14 +647,8 @@ private struct LocalSpeechModelsSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Local voice models")
-                        .font(.title3.weight(.semibold))
-
-                    Text("Download Whisper speech-to-text models for future offline voice input. Models are stored locally on this Mac.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
+                Text("Local voice models")
+                    .font(.title3.weight(.semibold))
 
                 Spacer()
 

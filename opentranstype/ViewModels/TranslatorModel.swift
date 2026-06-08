@@ -114,6 +114,21 @@ final class TranslatorModel: ObservableObject {
             : String(localized: "Ready")
     }
 
+    /// Shown when the frontmost app does not expose its text through Accessibility (e.g. WeChat),
+    /// so automatic reading is impossible and the user must trigger a manual selection instead.
+    func showManualSelectionHint() {
+        guard isEnabled, !isUpgradeRequired, translatedText.isEmpty else {
+            return
+        }
+
+        let hint = String(localized: "Press ⌘A to translate")
+        guard statusText != hint else {
+            return
+        }
+
+        statusText = hint
+    }
+
     func updateSourceText(_ text: String) {
         guard isEnabled, !isUpgradeRequired else {
             return

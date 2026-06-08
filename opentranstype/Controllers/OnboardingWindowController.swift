@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Combine
 import SwiftUI
 import Translation
 
@@ -81,6 +82,10 @@ struct OnboardingView: View {
     @State private var languageTask: Task<Void, Never>?
     @State private var pendingPreparationConfiguration: TranslationSession.Configuration?
 
+    // Polls accessibility trust so granting it in System Settings reflects back
+    // automatically, without the user having to click "Check Again".
+    private let accessibilityPoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
     var body: some View {
         ZStack {
             OnboardingBackdropView()
@@ -141,6 +146,11 @@ struct OnboardingView: View {
             languageCatalog.loadIfNeeded()
             refreshAccessibilityTrust()
             checkLanguagePack()
+        }
+        .onReceive(accessibilityPoll) { _ in
+            if page == 0, !isAccessibilityTrusted {
+                refreshAccessibilityTrust()
+            }
         }
         .onChange(of: model.selectedLanguage) { _, _ in
             checkLanguagePack()

@@ -15,16 +15,18 @@ final class OverlayWindowController {
     private let accessibility: AccessibilityTextController
     private let onRefresh: () -> Void
     private let onUpgrade: () -> Void
+    private let onClose: () -> Void
     private var window: NSPanel?
     private var userMovedWindow = false
     private var dragStartOrigin: CGPoint?
     private var resizeStartFrame: NSRect?
 
-    init(model: TranslatorModel, accessibility: AccessibilityTextController, onRefresh: @escaping () -> Void, onUpgrade: @escaping () -> Void) {
+    init(model: TranslatorModel, accessibility: AccessibilityTextController, onRefresh: @escaping () -> Void, onUpgrade: @escaping () -> Void, onClose: @escaping () -> Void) {
         self.model = model
         self.accessibility = accessibility
         self.onRefresh = onRefresh
         self.onUpgrade = onUpgrade
+        self.onClose = onClose
     }
 
     var isVisible: Bool {
@@ -38,7 +40,7 @@ final class OverlayWindowController {
                 onRefresh: onRefresh,
                 onUpgrade: onUpgrade,
                 onApply: { [weak self] in self?.applyTranslation() },
-                onClose: { [weak self] in self?.hide() },
+                onClose: onClose,
                 onDrag: { [weak self] translation in self?.dragWindow(by: translation) },
                 onDragEnded: { [weak self] in self?.finishDraggingWindow() },
                 onResize: { [weak self] translation in self?.resizeWindow(by: translation) },

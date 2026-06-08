@@ -7,6 +7,7 @@ SCHEME="opentranstype"
 CONFIGURATION="Debug"
 DERIVED_DATA="$ROOT_DIR/.derivedData"
 APP_PATH="$DERIVED_DATA/Build/Products/$CONFIGURATION/opentranstype.app"
+BUNDLE_ID="com.curisaas.www.opentranstype"
 PROCESS_PATTERN=".app/Contents/MacOS/opentranstype"
 LOCAL_PROCESS_PATTERN="$APP_PATH/Contents/MacOS/opentranstype"
 
@@ -21,11 +22,38 @@ app_pids() {
 }
 
 local_app_pids() {
+  bundle_app_pids
+  local_process_pids
+}
+
+bundle_app_pids() {
+  /usr/bin/osascript -l JavaScript <<OSA 2>/dev/null || true
+ObjC.import('AppKit')
+const apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('$BUNDLE_ID')
+for (let i = 0; i < apps.count; i++) {
+  const app = apps.objectAtIndex(i)
+  const bundleURL = app.bundleURL
+  if (bundleURL && ObjC.unwrap(bundleURL.path) === '$APP_PATH') {
+    console.log(app.processIdentifier)
+  }
+}
+OSA
+}
+
+local_process_pids() {
   /bin/ps -axo pid=,command= | while read -r pid command; do
     case "$command" in
-      "$LOCAL_PROCESS_PATTERN"*) printf '%s\n' "$pid" ;;
+      "$LOCAL_PROCESS_PATTERN"*|*"$LOCAL_PROCESS_PATTERN"*) printf '%s\n' "$pid" ;;
     esac
   done
+}
+
+wait_for_local_app() {
+  for _ in {1..100}; do
+    [[ -n "$(local_app_pids)" ]] && return 0
+    sleep 0.1
+  done
+  return 1
 }
 
 existing_pids="$(app_pids)"
@@ -58,6 +86,5 @@ fi
 /usr/bin/open -n "$APP_PATH"
 
 if [[ "${1:-}" == "--verify" ]]; then
-  sleep 1
-  [[ -n "$(local_app_pids)" ]]
+  wait_for_local_app
 fi

@@ -19,17 +19,18 @@ struct PaywallView: View {
     @State private var purchaseAlert: PaywallAlert?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                    .padding(.bottom, 2)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
                     featureGrid
                     planSection
                     footerActions
                 }
-                .padding(24)
             }
+            .padding(22)
         }
         .frame(minWidth: 520, idealWidth: 620, minHeight: 620)
         .task {
@@ -46,9 +47,33 @@ struct PaywallView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 14) {
-            HStack {
-                Spacer()
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "text.bubble.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 54, height: 54)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(red: 0.49, green: 0.52, blue: 1.0), Color(red: 0.31, green: 0.34, blue: 0.88)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 16)
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Transtype Pro")
+                        .font(.title.weight(.semibold))
+
+                    Text("Keep translation flowing across every macOS writing surface.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
                 Button {
                     if let onClose {
                         onClose()
@@ -63,31 +88,9 @@ struct PaywallView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(String(localized: "Close"))
             }
-
-            Image(systemName: "text.bubble.fill")
-                .font(.system(size: 44, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 86, height: 86)
-                .background(
-                    LinearGradient(
-                        colors: [Color(red: 0.49, green: 0.52, blue: 1.0), Color(red: 0.31, green: 0.34, blue: 0.88)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: RoundedRectangle(cornerRadius: 24)
-                )
-
-            Text("Transtype Pro")
-                .font(.largeTitle.weight(.semibold))
-
-            Text("Keep translation flowing across every macOS writing surface.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
         }
-        .padding(24)
-        .background(.thinMaterial)
+        .padding(16)
+        .liquidGlassPanel(cornerRadius: 18)
     }
 
     private var featureGrid: some View {
@@ -166,13 +169,17 @@ struct PaywallView: View {
         case .loading:
             return String(localized: "Loading...")
         case .loaded, .failed:
-            return String(localized: "Store Unavailable")
+            return String(localized: "Price shown after App Store connection")
         }
     }
 
     private func planSubtitle(for plan: PaywallPlan) -> String {
+        guard availableProducts.count == ProManager.ProductID.allCases.count else {
+            return plan.fallbackSubtitle
+        }
+
         guard let product = product(for: plan.productID) else {
-            return missingProductSubtitle
+            return plan.fallbackSubtitle
         }
 
         guard let subscription = product.subscription else {
@@ -302,7 +309,7 @@ struct PaywallView: View {
 
     @MainActor
     private func isPurchaseDisabled(for productID: ProManager.ProductID) -> Bool {
-        isPurchasing || product(for: productID) == nil
+        isPurchasing
     }
 
     private func productSortIndex(_ productID: String) -> Int {
@@ -348,6 +355,17 @@ private enum PaywallPlan: String, CaseIterable, Identifiable {
         self == .yearly
     }
 
+    var fallbackSubtitle: String {
+        switch self {
+        case .monthly:
+            return "US$1.99 per month"
+        case .yearly:
+            return "US$9.99 per year"
+        case .lifetime:
+            return "One-time purchase for US$19.99"
+        }
+    }
+
     static func availableOptions(for activeProductID: ProManager.ProductID?) -> [PaywallPlan] {
         switch activeProductID {
         case .none:
@@ -380,8 +398,8 @@ private struct PaywallFeatureCard: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, minHeight: 122, alignment: .topLeading)
-        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+        .padding(14)
         .liquidGlassPanel(cornerRadius: 12)
     }
 }
@@ -414,7 +432,7 @@ private struct PaywallOptionCard: View {
                     .background(.blue, in: Capsule())
             }
         }
-        .padding(16)
+        .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(Color.primary.opacity(0.04))

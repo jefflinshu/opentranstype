@@ -9,3 +9,6 @@ xcuserdata/
 
 *.swp
 *.tmp
+
+# App Store screenshot / asset build output
+appstore-output/
